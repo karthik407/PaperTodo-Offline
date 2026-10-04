@@ -64,6 +64,7 @@ internal static partial class Program
         try
         {
             ServiceBehavior();
+            StartupApprovalBehavior();
             CatalogBehavior();
             TodoMoveBehavior();
             AdapterBehavior();
@@ -86,6 +87,44 @@ internal static partial class Program
         c.RunMcpPostCommitUi(() => { calls++; throw new InvalidOperationException("UI refresh failed"); });
         DrainSettingsUi();
         Check(calls == 1, "A failed post-commit UI update must not replay its partial side effects.");
+    }
+
+    private static void StartupApprovalBehavior()
+    {
+        const string path = @"C:\Program Files\PaperTodo\PaperTodo.exe";
+        bool Enabled(object? runValue, object? approvalValue) =>
+            SystemSettingsHelper.IsStartupEnabled(runValue, approvalValue, path);
+
+        Check(Enabled($"\"{path}\"", null),
+            "A matching Run entry without StartupApproved state remains enabled.");
+        Check(Enabled(path, new byte[12]),
+            "A zeroed 12-byte StartupApproved value remains enabled.");
+        Check(Enabled(path, new byte[] { 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "StartupApproved 0x02 with a clear timestamp remains enabled.");
+        Check(Enabled(path, new byte[] { 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "StartupApproved 0x06 with a clear timestamp remains enabled.");
+        Check(!Enabled(path, new byte[] { 0x03, 0, 0, 0, 0xA5, 0x20, 0xF6, 0x4A, 0x95, 0xD7, 0xD9, 0x01 }),
+            "Task Manager disabled state with a timestamp overrides the Run entry.");
+        Check(!Enabled(path, new byte[] { 0x07, 0, 0, 0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80 }),
+            "Alternate disabled state with a timestamp overrides the Run entry.");
+        Check(Enabled(path, new byte[] { 0x06, 0, 0, 0, 0x1E, 0x38, 0x9F, 0x4C, 0x7D, 0x2A, 0xDB, 0x01 }),
+            "A re-enabled StartupApproved 0x06 record remains enabled with a historical timestamp.");
+        Check(Enabled(path, new byte[] { 0x02, 0, 0, 0, 0x1E, 0x38, 0x9F, 0x4C, 0x7D, 0x2A, 0xDB, 0x01 }),
+            "An enabled approval state is independent of its historical timestamp.");
+        Check(!Enabled(path, new byte[] { 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "Disabled StartupApproved 0x03 overrides the Run entry even without a timestamp.");
+        Check(!Enabled(path, new byte[] { 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "Disabled StartupApproved 0x07 overrides the Run entry even without a timestamp.");
+        Check(!Enabled(path, new byte[] { 0x08, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "An unknown approval state fails closed even with a clear timestamp.");
+        Check(!Enabled(path, new byte[] { 0x02, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "Approval matching checks the entire state DWORD, not just its first byte.");
+        Check(!Enabled(path, "020000000000000000000000"),
+            "A non-binary approval value fails closed.");
+        Check(!Enabled(path, new byte[] { 0x02 }),
+            "Malformed short StartupApproved state fails closed.");
+        Check(!Enabled(@"C:\Old\PaperTodo.exe", null),
+            "A stale Run path is not reported as enabled.");
     }
 
     private static void ServiceBehavior()
