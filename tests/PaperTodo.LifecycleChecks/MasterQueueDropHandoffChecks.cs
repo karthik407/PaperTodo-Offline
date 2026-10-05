@@ -1,0 +1,216 @@
+using System.Collections;
+using System.Reflection;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Threading;
+using PaperTodo;
+using PaperTodo.Plugin;
+
+internal static class MasterQueueDropHandoffChecks
+{
+    private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+
+    internal static void Run(AppController controller)
+    {
+        var masters = (IDictionary)typeof(AppController).GetField("_masterCapsules", Private)!
+            .GetValue(controller)!;
+        var sourceKey = "|" + DeepCapsuleSides.Right;
+        var targetKey = "|" + DeepCapsuleSides.Left;
+        var source = (MasterCapsuleWindow)masters[sourceKey]!;
+        Require(!masters.Contains(targetKey) && controller.State.EnableAnimations &&
+                controller.State.CapsuleCollapseAllActiveQueues[sourceKey],
+            "drop handoff fixture needs a collapsed source and an empty animated target");
+        Require(controller.TryCreateMasterQueueFloatingDragHostOptions(
+                "", EdgeCapsuleEdge.Right, "▸", "5", out var options),
+            "drop handoff fixture could not create floating options");
+        Require(controller.TryBeginMasterCapsuleQueueTransfer("", EdgeCapsuleEdge.Right,
+                controller.DeepCapsuleStartTopMarginForQueue("", EdgeCapsuleEdge.Right), out var snapshot),
+            "drop handoff fixture could not begin the source transfer");
+        var host = EdgeCapsuleDragWindow.Rent(options);
+        typeof(MasterCapsuleWindow).GetField("_floatingDragHost", Private)!.SetValue(source, host);
+        typeof(MasterCapsuleWindow).GetField("_queueTransferSnapshot", Private)!.SetValue(source, snapshot);
+        Require(WindowWorkAreaHelper.TryGetMonitorGeometryForDevice(null, out var monitor),
+            "drop handoff fixture needs a real monitor");
+        var drop = new DeviceScreenPoint(monitor.WorkArea.Left + 100, monitor.WorkArea.Top + 150);
+        var withdrawn = false;
+        var targetReadyAtWithdrawal = false;
+        var renderedWithCover = false;
+        var retired = false;
+
+        bool TargetReady()
+        {
+            var target = masters[targetKey] as MasterCapsuleWindow;
+            return target is { IsVisible: true } && target.Opacity >= 0.999 &&
+                target.IsMeasureValid && target.IsArrangeValid &&
+                WindowNative.TryGetWindowDeviceBounds(target, out var bounds) &&
+                !bounds.IsEmpty && Math.Abs(bounds.Left - monitor.WorkArea.Left) <= 1;
+        }
+
+        void OnHostVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            if (host.IsVisible) return;
+            withdrawn = true;
+            targetReadyAtWithdrawal = TargetReady();
+        }
+
+        void OnRendering(object? sender, EventArgs e)
+        {
+            if (host.IsVisible && TargetReady()) renderedWithCover = true;
+        }
+
+        void OnSourceClosed(object? sender, EventArgs e) => retired = true;
+
+        try
+        {
+            host.ShowWithEntrance(drop, false, 1, 0);
+            source.Hide();
+            source.Dispatcher.Invoke(static () => { }, DispatcherPriority.Render);
+            host.IsVisibleChanged += OnHostVisibilityChanged;
+            source.Closed += OnSourceClosed;
+            CompositionTarget.Rendering += OnRendering;
+            Require(controller.CommitMasterCapsuleQueueTransfer(snapshot, drop),
+                "collapsed source transfer did not commit");
+            Require(retired && host.IsVisible && !withdrawn,
+                "retiring the committed source withdrew the caller's floating cover");
+            Require(renderedWithCover,
+                "target master did not cross a WPF render turn while the floating cover was retained");
+            Require(controller.State.CapsuleCollapseAllActiveQueues.TryGetValue(targetKey, out var collapsed) && collapsed &&
+                    controller.State.Papers.All(paper => paper.CapsuleSide == DeepCapsuleSides.Left),
+                "drop handoff changed the committed queue membership or collapse state");
+            host.CompleteHandoff(() =>
+            {
+                typeof(MasterCapsuleWindow).GetMethod("ReleaseFloatingDragHostHandlers", Private)!.Invoke(source, null);
+                host.ReturnToPool();
+            });
+            Require(withdrawn && targetReadyAtWithdrawal,
+                "floating authority was withdrawn before the target master became opaque and laid out");
+            Require(TargetReady() && !host.IsVisible && !masters.Contains(sourceKey),
+                "drop handoff did not leave one live target master with the source retired");
+        }
+        finally
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            source.Closed -= OnSourceClosed;
+            host.IsVisibleChanged -= OnHostVisibilityChanged;
+            typeof(MasterCapsuleWindow).GetMethod("ReleaseFloatingDragHostHandlers", Private)!.Invoke(source, null);
+            typeof(MasterCapsuleWindow).GetField("_queueTransferSnapshot", Private)!.SetValue(source, null);
+            host.ReturnToPool();
+        }
+
+        // A same-queue drop keeps the source master rather than retiring it. The controller
+        // must publish that still-hidden master too, before the caller returns the floating lease.
+        var survivingSource = (MasterCapsuleWindow)masters[targetKey]!;
+        Require(controller.TryBeginMasterCapsuleQueueTransfer("", EdgeCapsuleEdge.Left,
+                controller.DeepCapsuleStartTopMarginForQueue("", EdgeCapsuleEdge.Left), out var sameQueue),
+            "same-queue handoff did not begin");
+        host = EdgeCapsuleDragWindow.Rent(options);
+        typeof(MasterCapsuleWindow).GetField("_floatingDragHost", Private)!.SetValue(survivingSource, host);
+        typeof(MasterCapsuleWindow).GetField("_queueTransferSnapshot", Private)!.SetValue(survivingSource, sameQueue);
+        withdrawn = targetReadyAtWithdrawal = renderedWithCover = false;
+        try
+        {
+            host.ShowWithEntrance(drop, false, 1, 0);
+            survivingSource.Hide();
+            survivingSource.Dispatcher.Invoke(static () => { }, DispatcherPriority.Render);
+            host.IsVisibleChanged += OnHostVisibilityChanged;
+            CompositionTarget.Rendering += OnRendering;
+            Require(controller.CommitMasterCapsuleQueueTransfer(sameQueue, drop) &&
+                    ReferenceEquals(survivingSource, masters[targetKey]) && TargetReady() &&
+                    host.IsVisible && renderedWithCover,
+                "same-queue commit did not publish the surviving master under the floating cover");
+            host.CompleteHandoff(() =>
+            {
+                typeof(MasterCapsuleWindow).GetMethod("ReleaseFloatingDragHostHandlers", Private)!
+                    .Invoke(survivingSource, null);
+                host.ReturnToPool();
+            });
+            Require(withdrawn && targetReadyAtWithdrawal,
+                "same-queue floating lease was withdrawn before the surviving master was ready");
+        }
+        finally
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            host.IsVisibleChanged -= OnHostVisibilityChanged;
+            typeof(MasterCapsuleWindow).GetMethod("ReleaseFloatingDragHostHandlers", Private)!
+                .Invoke(survivingSource, null);
+            typeof(MasterCapsuleWindow).GetField("_queueTransferSnapshot", Private)!.SetValue(survivingSource, null);
+            host.ReturnToPool();
+        }
+        var nextLease = EdgeCapsuleDragWindow.Rent(options);
+        try { Require(ReferenceEquals(host, nextLease), "completed drop stranded the shared floating HWND lease"); }
+        finally { nextLease.ReturnToPool(); }
+        RunReentrantShow(controller, masters);
+    }
+
+    private static void RunReentrantShow(AppController controller, IDictionary masters)
+    {
+        // The previous cases left a collapsed left queue. Keep one hidden member behind,
+        // then show it through the real MCP presentation path during the destination render turn.
+        var sourceKey = "|" + DeepCapsuleSides.Left;
+        var targetKey = "|" + DeepCapsuleSides.Right;
+        var hidden = controller.State.Papers[^1];
+        controller.HidePaper(hidden);
+        var source = (MasterCapsuleWindow)masters[sourceKey]!;
+        Require(hidden.IsCollapsed && !hidden.IsVisible && !masters.Contains(targetKey),
+            "reentrant handoff fixture needs a hidden collapsed source member and empty target");
+        Require(controller.TryCreateMasterQueueFloatingDragHostOptions(
+                "", EdgeCapsuleEdge.Left, "▸", "4", out var options),
+            "reentrant handoff could not create floating options");
+        Require(controller.TryBeginMasterCapsuleQueueTransfer("", EdgeCapsuleEdge.Left,
+                controller.DeepCapsuleStartTopMarginForQueue("", EdgeCapsuleEdge.Left), out var snapshot),
+            "reentrant handoff could not begin");
+        var host = EdgeCapsuleDragWindow.Rent(options);
+        typeof(MasterCapsuleWindow).GetField("_floatingDragHost", Private)!.SetValue(source, host);
+        typeof(MasterCapsuleWindow).GetField("_queueTransferSnapshot", Private)!.SetValue(source, snapshot);
+        Require(WindowWorkAreaHelper.TryGetMonitorGeometryForDevice(null, out var monitor),
+            "reentrant handoff needs a monitor");
+        var drop = new DeviceScreenPoint(monitor.WorkArea.Right - 100, monitor.WorkArea.Top + 150);
+        DispatcherOperation? show = null;
+        var showedUnderCover = false;
+        try
+        {
+            host.ShowWithEntrance(drop, false, 1, 0);
+            source.Hide();
+            source.Dispatcher.Invoke(static () => { }, DispatcherPriority.Render);
+            // McpApiHost dispatches at Normal, ahead of the shared Render boundary.
+            show = source.Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
+            {
+                showedUnderCover = host.IsVisible;
+                controller.PresentWorkspacePaper(hidden.Id, PaperPresentationAction.Show,
+                    activate: false, PaperOperationContext.Mcp());
+            }));
+            Require(controller.CommitMasterCapsuleQueueTransfer(snapshot, drop),
+                "reentrant handoff did not commit");
+            Require(show.Status == DispatcherOperationStatus.Completed && showedUnderCover,
+                "MCP show did not reenter while the floating cover was retained");
+            Require(masters[sourceKey] is MasterCapsuleWindow { IsVisible: true } restored &&
+                    !ReferenceEquals(restored, source),
+                "an old queue plan removed or hid the source master restored during handoff");
+            Require(hidden.IsVisible && hidden.CapsuleSide == DeepCapsuleSides.Left &&
+                    snapshot.PaperIds.All(id => controller.State.Papers.Single(p => p.Id == id)
+                        .CapsuleSide == DeepCapsuleSides.Right) &&
+                    controller.State.CapsuleCollapseAllActiveQueues[sourceKey] &&
+                    controller.State.CapsuleCollapseAllActiveQueues[targetKey],
+                "handoff reentry changed membership or retained collapse state");
+            Require(masters[targetKey] is MasterCapsuleWindow { IsVisible: true } && host.IsVisible,
+                "reentrant handoff lost the committed target or released its cover early");
+            host.CompleteHandoff(() =>
+            {
+                typeof(MasterCapsuleWindow).GetMethod("ReleaseFloatingDragHostHandlers", Private)!.Invoke(source, null);
+                host.ReturnToPool();
+            });
+        }
+        finally
+        {
+            show?.Abort();
+            typeof(MasterCapsuleWindow).GetMethod("ReleaseFloatingDragHostHandlers", Private)!.Invoke(source, null);
+            typeof(MasterCapsuleWindow).GetField("_queueTransferSnapshot", Private)!.SetValue(source, null);
+            host.ReturnToPool();
+        }
+    }
+
+    private static void Require(bool value, string message)
+    {
+        if (!value) throw new InvalidOperationException(message);
+    }
+}
