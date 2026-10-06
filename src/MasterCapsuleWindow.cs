@@ -327,6 +327,12 @@ public sealed class MasterCapsuleWindow : Window
 
     private bool ContinueMasterDrag(DeviceScreenPoint currentScreenPos, MasterDragSession session)
     {
+        if (EdgeCapsuleDragWindow.HasActiveLease)
+        {
+            FinishMasterGesture(commit: false);
+            return true;
+        }
+
         // A display change can invalidate the pressed queue before the delayed layout refresh
         // retires its master. Never apply that gesture's source margin to the fallback queue.
         if (!string.Equals(session.SourceQueueKey,
@@ -649,6 +655,7 @@ public sealed class MasterCapsuleWindow : Window
         }
 
         EdgeCapsuleDragWindow? floatingHost = null;
+        MasterCapsuleWindow? handoffTarget = null;
         var committed = false;
         try
         {
@@ -703,7 +710,8 @@ public sealed class MasterCapsuleWindow : Window
             {
                 committed = _controller.CommitMasterCapsuleQueueTransfer(
                     snapshot,
-                    outcome.DropPosition);
+                    outcome.DropPosition,
+                    out handoffTarget);
             }
 
             return true;
@@ -720,7 +728,6 @@ public sealed class MasterCapsuleWindow : Window
             _queueTransferSnapshot = null;
             _gestureState = MasterGestureState.Idle;
             _dragSession = null;
-            var targetReady = committed;
             try
             {
                 // Begin can synchronously retire this master before it receives the snapshot.
@@ -728,11 +735,10 @@ public sealed class MasterCapsuleWindow : Window
                 if (!committed)
                 {
                     _controller.CancelMasterCapsuleQueueTransfer(snapshot);
-                }
-                if (!committed && !_isClosingForReal)
-                {
-                    PrepareQueueTransferHandoff();
-                    targetReady = true;
+                    if (!_isClosingForReal)
+                    {
+                        handoffTarget = this;
+                    }
                 }
             }
             finally
@@ -749,11 +755,25 @@ public sealed class MasterCapsuleWindow : Window
                     }
                 }
 
-                // Keep the drag background and its lease until the surviving master is ready.
-                // A closed/canceled owner has no visible target to publish and only needs cleanup.
-                if (targetReady && floatingHost != null)
+                // The detached master already uses the ordinary drag HWND. Keep using that same
+                // HWND for the ordinary return flight instead of teleporting the target master
+                // underneath it and immediately withdrawing the cover.
+                if (floatingHost != null && handoffTarget != null)
                 {
-                    floatingHost.CompleteHandoff(ReleaseCover);
+                    if (_queueTransferCanceled)
+                    {
+                        // Explicit cancellation already withdrew the floating cover. There is
+                        // nothing visible to fly back, so restore the source authority immediately.
+                        handoffTarget.PrepareQueueTransferHandoff();
+                        floatingHost.CompleteHandoff(ReleaseCover);
+                    }
+                    else
+                    {
+                        BeginQueueTransferFloatingHandoff(
+                            floatingHost,
+                            handoffTarget,
+                            ReleaseCover);
+                    }
                 }
                 else
                 {
@@ -1111,6 +1131,15 @@ public sealed class MasterCapsuleWindow : Window
     }
     // First-time show: position at the final edge-aligned spot BEFORE becoming visible,
     // then fade in. This avoids both the top-left flash and the slide-in from the wrong place.
+    internal void PrepareQueueTransferTarget(int count, bool active)
+    {
+        // Queue-transfer targets stay entirely unpublished during the floating return flight.
+        // Their final physical anchor is pure geometry and does not require an invisible HWND.
+        _count = count;
+        _active = active;
+        ApplyStateVisuals();
+    }
+
     public void ShowPlaced(int count, bool active, bool animate)
     {
         _count = count;
@@ -1144,21 +1173,134 @@ public sealed class MasterCapsuleWindow : Window
         BeginAnimation(OpacityProperty, fadeIn);
     }
 
+    internal bool TryGetQueueTransferDockingTarget(
+        out DeviceScreenRect targetBounds,
+        out EdgeCapsuleEdge targetEdge)
+    {
+        targetBounds = default;
+        targetEdge = _queueEdge;
+        if (_isClosingForReal ||
+            !WindowWorkAreaHelper.TryGetMonitorGeometryForDevice(
+                _queueMonitorDeviceName,
+                this,
+                out var geometry))
+        {
+            return false;
+        }
+
+        var targetTop = EdgeCapsuleLayout.TopForIndex(
+            0,
+            QueueStartTopMargin,
+            geometry.LocalWorkAreaDip,
+            QueueSlotCount,
+            _controller.DeepCapsuleGap);
+        var docked = EdgeCapsuleGeometry.Calculate(new EdgeCapsuleGeometryInput(
+            geometry,
+            _queueEdge,
+            targetTop,
+            MasterDockedWidth(geometry.DpiScaleY),
+            0,
+            PaperLayoutDefaults.CapsuleHeight));
+
+        // Ordinary capsule docking adds the missing wall-side chrome margin to the one-sided
+        // docked HWND. Use the same physical anchor for the symmetric floating pill.
+        targetBounds = EdgeCapsuleGeometry.FloatingHandoffBoundsForDockedBounds(
+            docked.Bounds,
+            _queueEdge,
+            geometry.DpiScaleX,
+            WindowChromeMargin);
+        return !targetBounds.IsEmpty;
+    }
+
+    private void BeginQueueTransferFloatingHandoff(
+        EdgeCapsuleDragWindow floatingHost,
+        MasterCapsuleWindow target,
+        Action releaseCover)
+    {
+        var targetMonitor = target._queueMonitorDeviceName;
+        var targetEdge = target._queueEdge;
+        var hasTarget = target.TryGetQueueTransferDockingTarget(
+            out var targetBounds,
+            out _);
+
+        void Reveal()
+        {
+            floatingHost.AnimateDockingReveal(
+                _controller.State.EnableAnimations
+                    ? EdgeCapsuleLayout.DockingRevealMilliseconds
+                    : 1,
+                _ => floatingHost.CompleteHandoff(releaseCover));
+        }
+
+        void CompleteFlight(bool reachedTarget)
+        {
+            var current = _controller.MasterCapsuleForQueue(targetMonitor, targetEdge);
+            current?.PrepareQueueTransferHandoff();
+
+            // Preparing the WPF surface pumps Render and can dispatch an arrange that replaces
+            // the master or changes its geometry. Resolve once more after that boundary, then
+            // publish synchronously so the cover uses the same current endpoint as the master.
+            current = _controller.MasterCapsuleForQueue(targetMonitor, targetEdge);
+            current?.PublishQueueTransferHandoff();
+            if (current == null)
+            {
+                floatingHost.CompleteHandoff(releaseCover);
+                return;
+            }
+            if (!reachedTarget ||
+                !current.TryGetQueueTransferDockingTarget(out var currentBounds, out var currentEdge))
+            {
+                Reveal();
+                return;
+            }
+
+            if (currentEdge == targetEdge &&
+                EdgeCapsuleGeometry.DeviceBoundsMatch(currentBounds, targetBounds, tolerance: 0))
+            {
+                Reveal();
+            }
+            else
+            {
+                // An arrange during the flight is allowed. Align to its latest endpoint directly;
+                // do not replay the flight or hold a second controller transaction open.
+                floatingHost.AnimateDockingHandoff(currentBounds, currentEdge, 0, _ => Reveal());
+            }
+        }
+
+        if (!hasTarget)
+        {
+            CompleteFlight(false);
+            return;
+        }
+        floatingHost.AnimateDockingHandoff(
+            targetBounds,
+            targetEdge,
+            _controller.State.EnableAnimations
+                ? EdgeCapsuleLayout.DockingHandoffMilliseconds
+                : 1,
+            CompleteFlight);
+    }
+
     internal void PrepareQueueTransferHandoff()
     {
         if (_isClosingForReal) return;
 
-        // A drop/rollback swaps visible authority, so this master must be fully opaque rather
-        // than waiting for its ordinary first-show fade. Finish its WPF surface here; the shared
-        // floating host completes the composition/release boundary after this method returns.
+        PublishQueueTransferHandoff();
         // Call only after controller queue synchronization has finished: Render can reenter it.
+        Dispatcher.Invoke(static () => { }, System.Windows.Threading.DispatcherPriority.Render);
+    }
+
+    private void PublishQueueTransferHandoff()
+    {
+        if (_isClosingForReal) return;
+
+        // A drop/rollback swaps visible authority, so publish fully opaque under the floating cover.
         BeginAnimation(OpacityProperty, null);
         Opacity = 1;
         MoveToTarget(animate: false);
         if (!IsVisible) Show();
         RefreshEffectiveTopmost();
         UpdateLayout();
-        Dispatcher.Invoke(static () => { }, System.Windows.Threading.DispatcherPriority.Render);
     }
 
     public void CloseForReal()
