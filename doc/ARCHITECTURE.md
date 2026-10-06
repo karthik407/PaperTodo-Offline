@@ -393,7 +393,7 @@ DirectComposition queue proxy 负责：
 
 边缘浏览材质由已呈现帧的 `DockedPreview` 标记选择：`EdgeCapsuleHost.Apply` 在几何更新前让 `SkinBorder` 使用同材质固定色调与 alpha 的静态表面和细高光，展开／收回期间不随大小、强弱档或采样准备状态改变底色，不进行桌面采样、像素着色、法线条纹重建或指针光效订阅。退出浏览的形态过渡仍保持此路径，回到紧凑胶囊终态后恢复普通材质；不改变 frame、内容、命中或 HWND ownership。
 
-当 queue proxy 保留真实胶囊 HWND 作为 live source 时，该 source 暂停新的辅助材质采样并立即释放正在进行的采样租约，但保留已经呈现的静态材质 scene 供 live surface 使用；只有 compositor handoff 已把 visual authority 归还真实 HWND 后，才在终点重新取得一张局部静态快照替换旧 scene。采样租约不能跨 cloak／cover authority 边界，也不能因此扩大 proxy envelope 或真实 HostBounds 的输入区域。
+当 queue proxy 保留真实胶囊 HWND 作为 live source 时，该 source 暂停新的辅助材质采样并立即释放正在进行的采样租约，但保留已经呈现的静态材质 scene 供 live surface 使用；只有 compositor handoff 已把 visual authority 归还真实 HWND 后，才在终点重新取得一张局部静态快照替换旧 scene。采样租约不能跨 cloak／cover authority 边界，也不能因此扩大 proxy envelope 或真实 HostBounds 的输入区域。后台采样只投递一个成功或失败终态通知，已取消任务不得发布结果；晚到的拖拽快照仍按当前材质资格接收，不恢复已经关闭或切成轻量预览的背景。
 
 Production translation backend 不承担 snapshot、clip/scale/effect resize 或另一套 deferred-resize presentation model。需要 shape/size 变化时，回到 WPF bounded host 或明确 native fallback 边界。
 
@@ -405,13 +405,13 @@ Production translation backend 不承担 snapshot、clip/scale/effect resize 或
 
 代理收到按下消息时保存原始客户区坐标转换得到的屏幕位置和按键状态。只有这次按下触发的同步 authority handoff 当场成功，才把该按下消息转交给真实端点；一旦需要 completion retry、cover 丢失或目标已失效，就直接丢弃该按下，不跨重试保存或迟到重放。该路径只转交原始按下消息，不承诺合成完整按下—抬起手势；正常 Windows 输入仍由真实端点接管。
 
-Proxy 动画逻辑结束不等于 real WPF 已经可以接管。只有 terminal real/WPF presentation 已完成必要的 apply/layout/render/verify 边界后，cover 才能释放；completion timer 只负责发起完成尝试，不作为 correctness proof。自动 completion retry 最多两次；预算耗尽后保留当前可见 cover，不再切换到另一套定时恢复循环。
+Proxy 动画逻辑结束不等于 real WPF 已经可以接管。只有 terminal real/WPF presentation 已完成必要的 apply/layout/render/verify 边界后才撤 cover；completion timer 只负责发起完成尝试，不作为 correctness proof。动画准入可使用近似帧比较，但结束或取消 timeline 后必须提交精确的 target frame，不能沿用仅在容差内相等的 opacity／材质状态，否则会与 handoff 的精确一致性验证永久冲突。真实失败仍走既有有界 retry 与 cover-loss 生命周期，不把普通终帧不一致伪装成 compositor 丢失，也不通过新增恢复层或放宽 verify 掩盖它。
 
 Display/DPI、z-order、drag 结束、隐藏/关闭 Edge 模式等生命周期边界如果会让现有 surface/queue 失效，先结束或恢复当前 visual authority，再清理 preview、retraction、临时 placement/transaction 等 transient state；这些临时状态不能跨失效边界残留到下一次显示或重新启用。
 
 ### 6.6 Pointer、Preview corridor 与帧节拍
 
-Hover/Preview 的最终物理 truth 来自当前 presented/applied `InteractiveBounds`。WPF/native enter/leave 主要负责唤醒采样，透明 `HostBounds` 和 proxy envelope 不能扩大 hit area。
+Hover/Preview 的最终物理 truth 来自当前 presented/applied `InteractiveBounds`。WPF/native enter/leave 主要负责唤醒采样，透明 `HostBounds` 和 proxy envelope 不能扩大 hit area。进入／离开 `DockedRetracted` 的主胶囊整队 proxy 是纯视觉 authority，output HWND 在 cold stage 之前一次性切到原生 layered + transparent passthrough；该 native 模式不在同一 HWND 上反向恢复。master generation 释放后直接退休这一 output host，后续 interactive proxy 使用新的／未进入 passthrough 的 host；同一 host 的 successor 不能跨越 master/interactive 输入角色。不能只依赖 envelope 内的 `HTTRANSPARENT` 来承担跨应用穿透。
 
 Preview session 建立后，当前 owner 是 queue-wide 的 pointer arbiter：owner、候选 target、transfer corridor 和 outside 都由同一 controller 路径解析，host/WPF 输入适配层只提供物理采样，不复制另一套 preview 状态机。owner 与可浏览候选的 `InteractiveBounds` 是真实命中区；连续可交互成员之间的 transfer corridor 只是允许指针跨空白移动的临时连续区域，不是新的 capsule hit area。指针真实离开合法 transfer region 时属于硬边界，预测逻辑不能把 outside 改写成 inside；pointer capture 期间则暂停这类离场判断，避免正在进行的交互被 corridor watcher 抢走。
 
