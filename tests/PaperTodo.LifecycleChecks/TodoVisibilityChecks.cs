@@ -9,8 +9,8 @@ using PaperTodo;
 internal static class TodoVisibilityChecks
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-    private static readonly string[] LinkedIds = ["note-link", "script-link", "self-link"];
-    private static readonly string[] UnchangedIds = ["ordinary", "missing-link", "path-link"];
+    private static readonly string[] LinkedIds = ["note-link", "script-link"];
+    private static readonly string[] UnchangedIds = ["ordinary", "missing-link", "path-link", "self-link"];
 
     internal static async Task Run()
     {
@@ -53,7 +53,10 @@ internal static class TodoVisibilityChecks
         var linkedWindow = windows[linked.Id];
         var plainWindow = windows[unlinked.Id];
         Require(controller.TryGetLinkedPaperTitle(note.Id, out _), "an empty Note title stopped being a valid link");
-        Require(controller.TryGetLinkedPaperTitle(linked.Id, out _), "a Todo self-link stopped being a valid link");
+        Require(controller.State.Papers.Single(paper => paper.Id == linked.Id).Items
+                    .Single(item => item.Id == "self-link").LinkedPaperId == null &&
+                LinkButton(linkedWindow, "self-link") == null,
+            "a persisted self-link was not normalized before the visibility refresh");
         Require(controller.ShouldRunLinkedScriptCapsule(script.Id), "script target was not recognized");
         Require(LinkText(linkedWindow, "script-link").Text == "⚡", "script button lost its run presentation");
         Require(LinkButton(linkedWindow, "missing-link") == null, "a missing target acquired a linked-paper button");
@@ -167,7 +170,7 @@ internal static class TodoVisibilityChecks
         RequireNoAppendArea(linkedWindow);
         foreach (var id in LinkedIds) RequireLinkActivity(linkedWindow, id, active: false);
 
-        Console.WriteLine("PASS todo visibility: ordinary row/editor/selection retention; one linked-row reconcile; active buttons and clicks; script/path/missing/self links; disabled links and bottom bar; hidden/deferred bodies");
+        Console.WriteLine("PASS todo visibility: ordinary row/editor/selection retention; one linked-row reconcile; active buttons and clicks; script/path links and normalized invalid links; disabled links and bottom bar; hidden/deferred bodies");
     }
 
     private static PaperData Paper(string id, string type) => new()

@@ -7,12 +7,6 @@ internal static partial class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args is ["--todo-visibility-audit", var auditPath])
-            return RunTodoVisibilityAudit(auditPath);
-        if (args is ["--todo-visibility-audit-fixture", var rowCount, var linkCount] &&
-            int.TryParse(rowCount, out var rows) && rows is 100 or 200 &&
-            int.TryParse(linkCount, out var links) && links is 0 or 2)
-            return TodoVisibilityAuditFixture(rows, links);
         if (args is ["--lifecycle-fixture", var count] && int.TryParse(count, out var parsed) && parsed is > 0 and <= 100)
             return LifecycleFixture(parsed);
         if (args is ["--help"] or ["-h"] or [])

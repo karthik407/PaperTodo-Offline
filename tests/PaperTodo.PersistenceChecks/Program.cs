@@ -4,11 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using PaperTodo;
 
-if (args is ["--plugin-io-audit", var auditOutput])
-{
-    return PluginIoAudit.Run(auditOutput);
-}
-
 var checks = new (string Name, Action Run)[]
 {
     ("primary-save-faults-keep-a-loadable-generation", PrimarySaveFaultsKeepALoadableGeneration),
