@@ -1779,8 +1779,12 @@ public sealed partial class AppController : IDisposable
 
     public void RefreshFloatingSurfaceZOrder()
     {
-        foreach (var window in _windows.Values)
+        // A changed native z-order completes the queue proxy through a synchronous Render wait.
+        foreach (var window in _windows.Values.ToArray())
         {
+            if (window.IsClosed ||
+                !_windows.TryGetValue(window.PaperId, out var current) ||
+                !ReferenceEquals(current, window)) continue;
             window.RefreshDeepCapsuleSlotTopmost();
         }
         foreach (var m in _masterCapsules.Values) m.RefreshEffectiveTopmost();
@@ -1805,22 +1809,29 @@ public sealed partial class AppController : IDisposable
     public void HidePaper(PaperData paper)
     {
         InvalidateVisibilityShortcutSnapshotForExternalCommand();
+        var visibilityVersion = NextVisibilityAnimationVersion(paper.Id);
         _windows.TryGetValue(paper.Id, out var window);
+        bool IsCurrentHideWindow() => window != null && !window.IsClosed &&
+            IsVisibilityAnimationCurrent(paper.Id, visibilityVersion) &&
+            _windows.TryGetValue(paper.Id, out var current) && ReferenceEquals(current, window);
         if (window != null)
         {
             RestoreExperimentalPassiveForWindow(window);
+            if (IsCurrentHideWindow()) window.PrepareForHide();
         }
-        window?.PrepareForHide();
+        // A later show/delete can run inside proxy handoff or a body lifecycle callback.
+        if (!IsVisibilityAnimationCurrent(paper.Id, visibilityVersion)) return;
         paper.IsVisible = false;
-        var visibilityVersion = NextVisibilityAnimationVersion(paper.Id);
 
-        if (window != null)
+        if (window != null && IsCurrentHideWindow())
         {
             if (!paper.IsCollapsed && !window.IsDeepCapsulePlaced)
             {
                 window.SaveGeometryForCurrentPresentation();
             }
+            if (!IsCurrentHideWindow()) return;
             window.DetachFromDeepCapsuleStack(animate: State.EnableAnimations);
+            if (!IsCurrentHideWindow()) return;
 
             // 隐藏动画：淡出
             if (State.EnableAnimations && window.IsVisible)
@@ -1831,19 +1842,15 @@ public sealed partial class AppController : IDisposable
                 };
                 fadeOut.Completed += (s, e) =>
                 {
-                    window.BeginAnimation(Window.OpacityProperty, null);
-                    window.Opacity = 1;
-                    if (paper.IsVisible ||
-                        window.IsClosed ||
-                        !IsVisibilityAnimationCurrent(paper.Id, visibilityVersion) ||
-                        !_windows.TryGetValue(paper.Id, out var currentWindow) ||
-                        !ReferenceEquals(currentWindow, window))
+                    if (paper.IsVisible || !IsCurrentHideWindow())
                     {
                         return;
                     }
 
+                    window.BeginAnimation(Window.OpacityProperty, null);
+                    window.Opacity = 1;
                     window.HideWithoutGeometrySave();
-                    window.ReleaseHiddenNoteImages();
+                    if (IsCurrentHideWindow()) window.ReleaseHiddenNoteImages();
                 };
                 window.BeginAnimation(Window.OpacityProperty, fadeOut);
             }
@@ -1852,7 +1859,7 @@ public sealed partial class AppController : IDisposable
                 window.BeginAnimation(Window.OpacityProperty, null);
                 window.Opacity = 1;
                 window.HideWithoutGeometrySave();
-                window.ReleaseHiddenNoteImages();
+                if (IsCurrentHideWindow()) window.ReleaseHiddenNoteImages();
             }
         }
 
@@ -1923,29 +1930,44 @@ public sealed partial class AppController : IDisposable
 
     public void HideAllPapers()
     {
+        // Proxy handoff and body callbacks can run another UI command synchronously. Keep this
+        // hide scoped to its original targets; each later show/delete supersedes that target.
+        var papersToHide = State.Papers.ToArray();
+        var windowsToHide = _windows.Values.ToArray();
+        var visibilityVersions = papersToHide.Select(paper => paper.Id)
+            .Concat(windowsToHide.Select(window => window.PaperId))
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(id => id, NextVisibilityAnimationVersion, StringComparer.Ordinal);
+        bool IsCurrentHideWindow(PaperWindow window) => !window.IsClosed &&
+            IsVisibilityAnimationCurrent(window.PaperId, visibilityVersions[window.PaperId]) &&
+            _windows.TryGetValue(window.PaperId, out var current) && ReferenceEquals(current, window);
         CancelMasterCapsuleQueueTransfers();
         InvalidateVisibilityShortcutSnapshotForExternalCommand();
         _paperSurfaceRestoreGeneration++;
         _isPreparingStartupEdgeCapsules = false;
 
-        foreach (var window in _windows.Values)
+        foreach (var window in windowsToHide)
         {
+            if (!IsCurrentHideWindow(window)) continue;
             RestoreExperimentalPassiveForWindow(window);
-            window.PrepareForHide();
+            if (IsCurrentHideWindow(window)) window.PrepareForHide();
         }
 
-        foreach (var paper in State.Papers)
+        foreach (var paper in papersToHide)
         {
-            paper.IsVisible = false;
+            if (IsVisibilityAnimationCurrent(paper.Id, visibilityVersions[paper.Id]))
+                paper.IsVisible = false;
         }
 
-        foreach (var window in _windows.Values)
+        foreach (var window in windowsToHide)
         {
+            if (!IsCurrentHideWindow(window)) continue;
             // Fully detach from the stack, not just the expanded reservation: a docked collapsed
             // capsule shows its own slot-host window that a reservation-only clear leaves on screen.
             window.DetachFromDeepCapsuleStack();
+            if (!IsCurrentHideWindow(window)) continue;
             window.HideWithoutGeometrySave();
-            window.ReleaseHiddenNoteImages();
+            if (IsCurrentHideWindow(window)) window.ReleaseHiddenNoteImages();
         }
 
         // Linked-paper buttons cache whether their target currently has an expanded surface.

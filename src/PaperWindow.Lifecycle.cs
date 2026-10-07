@@ -53,6 +53,7 @@ public sealed partial class PaperWindow
     }
 
     private PaperWindowLifecycleState _windowLifecycle = PaperWindowLifecycleState.Alive;
+    private bool _isClosingForReal;
     private PaperPresentationState _presentationState;
     private TitleBarDragSession? _titleBarDragSession;
     private int _titleEditIntentGeneration;
@@ -245,9 +246,11 @@ public sealed partial class PaperWindow
         // The compositor proxy can only hand off while this window still accepts endpoint frames.
         // Reveal the small real host before changing the lifecycle state to Closing.
         _controller.CompleteEdgeCapsuleQueueCompositionProxyFor(this);
+        if (_windowLifecycle != PaperWindowLifecycleState.Alive) return;
         // Controller exit already committed all editors and saved the final snapshot. Ordinary
         // close/hide still commits here; shutdown must not commit them for a second time.
         if (_controller.IsRunning) CommitPendingEditsForSave();
+        if (_windowLifecycle != PaperWindowLifecycleState.Alive) return;
         _windowLifecycle = PaperWindowLifecycleState.Closing;
         _presentationState = PaperPresentationState.Closing;
         _collapseTransitionGeneration++;

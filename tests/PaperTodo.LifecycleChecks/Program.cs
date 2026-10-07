@@ -11,7 +11,7 @@ internal static class Program
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
     private const string FixtureMarker = ".papertodo-lifecycle-fixture";
-    private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "real-exit", "early-expand", "cancel-prewarm", "real-exit-scripts", "early-exit"];
+    private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "real-exit", "early-expand", "cancel-prewarm", "real-exit-scripts", "early-exit"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -169,6 +169,8 @@ internal static class Program
             state.PaperSkin = PaperSkins.Acrylic;
             state.MatchAuxiliaryMaterialStrength = true;
         }
+        if (name.StartsWith("controller-"))
+            state.CapsuleCollapseAllActiveQueues["|" + DeepCapsuleSides.Right] = true;
         var store = new StateStore();
         store.SaveJsonSync(store.SerializeState(state), 1);
         var controller = new AppController();
@@ -206,6 +208,26 @@ internal static class Program
             if (name == "master-queue-material-handoff")
             {
                 await MasterMaterialHandoffChecks.Run(controller, windows);
+                return;
+            }
+            if (name == "controller-hide-create-reentry")
+            {
+                await ControllerReentrancyChecks.HideDuringCreate(controller, windows);
+                return;
+            }
+            if (name == "controller-hide-show-reentry")
+            {
+                await ControllerReentrancyChecks.HideDuringShow(controller, windows);
+                return;
+            }
+            if (name == "controller-zorder-create-reentry")
+            {
+                await ControllerReentrancyChecks.ZOrderDuringCreate(controller, windows);
+                return;
+            }
+            if (name == "controller-close-delete-reentry")
+            {
+                await ControllerReentrancyChecks.CloseDuringDelete(controller, windows);
                 return;
             }
             if (name == "master-queue-drag-preparation")
