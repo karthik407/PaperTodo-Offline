@@ -37,7 +37,7 @@ internal static class ControllerReentrancyChecks
                     new CreatePaperRequest
                     {
                         Type = PaperTypes.Note,
-                        Title = "created during hide handoff",
+                        Title = "新建",
                         Show = true
                     },
                     PaperOperationContext.Mcp());
@@ -137,8 +137,8 @@ internal static class ControllerReentrancyChecks
         }, DispatcherPriority.Normal);
 
         insideRefresh = true;
-        // Opening a real capsule menu changes the native topmost contract, which forces this
-        // public controller refresh to complete the active proxy before changing z-order.
+        // The controller entry used by a capsule menu changes the native topmost contract,
+        // forcing the active proxy to complete before the z-order change.
         try { controller.SetDeepCapsuleContextMenuOpen(originalWindows[0].PaperId, true); }
         catch (Exception ex) { refreshFailure = ex; }
         finally { insideRefresh = false; }
