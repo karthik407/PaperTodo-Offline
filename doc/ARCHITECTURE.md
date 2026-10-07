@@ -192,6 +192,8 @@ Markdown 中的 Note 图片只通过 PaperTodo 内部 `i:` asset URI 引用宿�
 
 `PaperWindow` 是单纸片 UI owner，负责普通 paper shell、Todo/Note 交互、标题/工具栏、窗口行为和各子系统适配。
 
+窗口交接的同步 Render 等待和正文回调允许同一 Dispatcher 上的外部命令重入。`AppController` 的批量隐藏与浮层 z-order 更新只遍历本次入口的窗口集合；隐藏复用既有逐纸片 visibility version，后到的显示／删除命令使旧目标失效，旧淡出回调也不能再修改新显示的 opacity 或图像资源。关闭过程由 `PaperWindow.CloseForReal` 的调用范围防重入，但在 compositor 交接完成前仍保持 Alive、接受精确端点；交接或正文回调返回后复核生命周期，Closed 不得回退到 Closing。
+
 Edge Capsule 启用后，一张纸的可见 surface 不再等价于一个 `PaperWindow` HWND：docked capsule 由 `EdgeCapsuleHost` 提供，跨队列/脱墙拖拽可以临时使用 `EdgeCapsuleDragWindow`；这些 surface 仍引用同一 `PaperData`，不复制业务对象。
 
 内置 Markdown Note 的编辑态和浏览态复用同一个 `MarkdownTextBox`，通过 interaction/presentation 状态切换，而不是维护两套正文 surface。
@@ -205,7 +207,7 @@ Edge Capsule 启用后，一张纸的可见 surface 不再等价于一个 `Paper
 
 `SkinBorder` 负责绘制和可选背景层的接入，画刷与几何缓存分开：配色只使画刷失效，尺寸只使几何失效，动画或采样开关不重建编辑器与顶栏图标。`Theme.MaterialColors` 缓存当前材质配色。`SkinBorder.BackgroundSession` 按需持有后台采样、最新帧、位图和呈现订阅；普通纸片、展开原生材质和设置窗口不创建采样会话，也不注册软件采样宿主观察。`MaterialSurfaceHost` 仅为需要采样的辅助表面或 Aero 透光／视差观察真实 `HwndSource`、宿主位置、DPI、可见性与祖先透明度，不使用菜单 owner 代替 popup，不接管输入或形态几何。窗口销毁／源释放／卸载解除订阅并停止对应资源。`DwmMicaApi` 的透明效果和 composition 状态由系统事件使缓存失效，不在移动热路径反复读注册表；仅切换“保持激活外观”不重新安装原生背景。
 
-`DesktopBackgroundCapture` 在本机内存中用 SRCCOPY 采样局部 SDR 背景，保留逐窗口像素预算、独立低频采样、屏幕锚定采样网格与单最新帧所有权；停止与迟到发布互斥，已转交呈现端的缓冲只由接收者释放。菜单的移动余量小于可拖动胶囊，但内侧保护区仍覆盖最强模糊核；不会降低正文或整个应用的帧率。范围减少不等于所有 DPI 下上传像素都减少：较小范围可能退出降采样档，采样预算和质量分别检查。UI 继续使用零等待 TryLock；首次／映射变化先填充并冻结新位图，再一起发布像素和坐标，同一区域后续变化复用可写位图。背景视觉与表面染色／描边位于真实正文之前；Aero、展开纸片和设置窗口不采样。采样期间的截图排除及结束恢复原 affinity 保留，开关和数据字段不变。
+`DesktopBackgroundCapture` 在本机内存中用 SRCCOPY 取得一次局部 SDR 背景，按窗口像素预算生成冻结位图，再将像素与坐标一起交给表面；显示期间保留该 scene，位置变化只重新投影，不运行轮询、逐帧上传或可写位图更新。胶囊拖动使用一次半分辨率虚拟桌面快照，贴边与浮动表面共享纹理，结束后再取得最终局部背景。每个已有辅助表面由 `SkinBorder` 合并队列交接与拖动准备这两个暂停原因，起拖即撤销局部采样，不等待拖动结果返回才排他。两类采样共用作用域内的原生截图排除清理；取消必须同步恢复 affinity，旧 worker 退出只能幂等释放自己的资源，不能修改复用 HWND 的新生命周期。`BackgroundSession.Stop` 只释放 scene／capture，不解除仍由外层持有的暂停。暂停阻止新采样，但不阻止材质模式、系统效果或拖动透明度失效时的正常回退；队列 cover 的合法呈现淡出仍保留 live source 像素。菜单的内侧保护区覆盖最强模糊核；背景视觉位于正文之前，Aero、展开纸片和设置窗口不采样。
 
 `MaterialMenuOpening` 只延后需要软件背景的菜单打开请求。每次请求拥有一个取消生命周期；关闭或 owner 卸载仅撤销该请求，异步任务独自负责释放，迟到结果不得重新打开菜单或进入后续请求。成功时在 HWND 出现前上传冻结首帧，最终 WPF arrange 决定位置，再用 SetCurrentValue 重放仍有效的打开请求；不恢复系统淡入，不增加预热窗口或前景隐藏。失败／超时仅在本次使用静态回退。设置切页继续保留原生外壳和同一编辑器；首次 Clear Acrylic 仍等待实际 ContentRendered。`MaterialRelief` 只复用相同深度／法线的 Aero 直边照明，圆角仍解析计算，逐像素结果与未缓存算法对照。理由与历史修复见 D-053；当前一次性静态快照与拖动纹理边界见 D-054；真实 Windows 11、HDR、混合 DPI 和高刷新率观感仍需人工验收。
 
@@ -401,7 +403,7 @@ Production translation backend 不承担 snapshot、clip/scale/effect resize 或
 
 真实 docked HWND、queue compositor cover、floating drag HWND 是显式 visual authority。任何 publication、successor、handoff 或 rollback 边界都必须保证至少有一个可见 authority。
 
-同队列 successor 继承 predecessor 当前 live authority 和可见 sample，而不是 dispose 后冷启动另一套互不相关 proxy。
+同队列 successor 继承 predecessor 当前 live authority 和可见 sample，而不是 dispose 后冷启动另一套互不相关 proxy。端点提交期间 predecessor 仍可继续移动；successor 校准起点后，显示取样、输入命中、点击坐标转交和下一代临时 cover 均使用本代 `VisualState` 实际提交给 DComp 的起止偏移及同一动画时钟，不能继续沿用较早捕获的 plan 起点。该校准只调整平移，WPF 的形状、内容、opacity 和真实端点容量仍沿用原有 presentation contract。
 
 代理收到按下消息时保存原始客户区坐标转换得到的屏幕位置和按键状态。只有这次按下触发的同步 authority handoff 当场成功，才把该按下消息转交给真实端点；一旦需要 completion retry、cover 丢失或目标已失效，就直接丢弃该按下，不跨重试保存或迟到重放。该路径只转交原始按下消息，不承诺合成完整按下—抬起手势；正常 Windows 输入仍由真实端点接管。
 
@@ -515,5 +517,3 @@ same AvalonEdit TextView
 - Full 固定槽位对应的引用竖线直接读取 TextView 的实际坐标；有序列表的续行对齐及 Basic/Enhanced 定位保持原行为。省略 `>` 的惰性续行由 `QuoteIndentElement` 占位，并与真实引用共用“引用槽宽 + 原生空格宽”；该元素仍可合并消费同偏移的塌缩语法，保持一份源码和光标边界。
 - 图片 `i:` 协议、URL 打开白名单、原生保存仍属于 PaperTodo host concern；图片是否位于 code/container 等 Markdown 语义由同一 Markdig snapshot 决定。启动图片 GC 额外采用保守保护扫描，允许多保留但不因 parser 分歧误删 blob。
 - `MarkdownFencedCodeScanner` 只保留在“边界发现/受限预览”角色：Edge Mini 的有限导航近似以及大 Note incremental fence-window discovery 可以使用；它不是正文、持久化或数据回收的 Markdown authority，也不扩展成第二套 container-aware Markdown parser。
-
-
