@@ -131,7 +131,7 @@ internal static class Program
         const int count = 5;
         var state = new AppState
         {
-            TelemetryEnabled = false, EnableAnimations = true,
+            EnableAnimations = true,
             UseCapsuleMode = true, UseDeepCapsuleMode = true,
             ExperimentalEdgeCapsuleHoverPreview = true,
             UsePersistentPowerShellProcess = false, McpEnabled = false

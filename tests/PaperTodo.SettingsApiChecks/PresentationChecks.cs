@@ -85,7 +85,7 @@ internal static partial class Program
     {
         var state = new AppState
         {
-            TelemetryEnabled = false, EnableAnimations = false, UseCapsuleMode = true,
+            EnableAnimations = false, UseCapsuleMode = true,
             UseDeepCapsuleMode = edge, UsePersistentPowerShellProcess = false, McpEnabled = false,
             HidePapersFromTaskbar = false, HidePapersFromWindowSwitcher = false
         };
