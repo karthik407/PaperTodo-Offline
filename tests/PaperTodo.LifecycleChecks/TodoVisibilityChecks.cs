@@ -71,7 +71,7 @@ internal static class TodoVisibilityChecks
         var linkedBefore = Snapshot.Capture(linkedWindow);
         linkedWindow.RefreshLinkedPaperRowsForVisibility();
         await Idle();
-        RequireReconcile(linkedWindow, linkedBefore, LinkedIds, "direct visibility refresh");
+        RequireReconcile(linkedWindow, linkedBefore, [], "direct visibility refresh");
         Require(ReferenceEquals(FocusManager.GetFocusedElement(linkedWindow), editor),
             "an ordinary editor lost logical focus during a linked-button refresh");
         RequireSelection(editor, selection, "direct visibility refresh");
@@ -82,7 +82,7 @@ internal static class TodoVisibilityChecks
         await Idle();
         Require(windows.Values.All(window => !window.HasVisibleSurface), "hide-all left a paper surface visible");
         RequireReconcile(plainWindow, plainBefore, [], "hide-all without links");
-        RequireReconcile(linkedWindow, linkedBefore, LinkedIds, "hide-all with links");
+        RequireReconcile(linkedWindow, linkedBefore, [], "hide-all with links");
         RequireSelection(editor, selection, "hide-all");
         foreach (var id in LinkedIds) RequireLinkActivity(linkedWindow, id, active: false);
 
@@ -92,7 +92,7 @@ internal static class TodoVisibilityChecks
         await Idle();
         Require(windows.Values.All(window => window.HasExpandedPaperSurface), "show-all did not restore expanded paper surfaces");
         RequireReconcile(plainWindow, plainBefore, [], "show-all without links");
-        RequireReconcile(linkedWindow, linkedBefore, LinkedIds, "show-all with links");
+        RequireReconcile(linkedWindow, linkedBefore, [], "show-all with links");
         RequireSelection(editor, selection, "show-all");
         Require(editor.Text == controller.State.Papers.Single(paper => paper.Id == linked.Id).Items.Single(item => item.Id == "ordinary").Text,
             "visibility refresh lost the in-progress ordinary edit");
@@ -112,11 +112,22 @@ internal static class TodoVisibilityChecks
         linkedWindow.Activate();
         linkedEditor.Focus();
         FocusManager.SetFocusedElement(linkedWindow, linkedEditor);
+        var linkedText = linkedEditor.Text;
+        linkedEditor.Select(linkedEditor.Text.Length, 0);
+        linkedEditor.SelectedText = " preserved edit";
+        linkedEditor.Select(2, 5);
+        var linkedSelection = (linkedEditor.SelectionStart, linkedEditor.SelectionLength, linkedEditor.CaretIndex);
+        Require(linkedEditor.CanUndo, "linked editor fixture has no native text history");
+        linkedBefore = Snapshot.Capture(linkedWindow);
         linkedWindow.RefreshLinkedPaperRowsForVisibility();
         await Idle();
-        Require(!ReferenceEquals(linkedEditor, Editors(linkedWindow)["note-link"]) &&
-            ReferenceEquals(FocusManager.GetFocusedElement(linkedWindow), Editors(linkedWindow)["note-link"]),
-            "replacing the edited linked row left focus on a detached editor");
+        RequireReconcile(linkedWindow, linkedBefore, [], "edited linked row visibility refresh");
+        Require(ReferenceEquals(linkedEditor, Editors(linkedWindow)["note-link"]) &&
+            ReferenceEquals(FocusManager.GetFocusedElement(linkedWindow), linkedEditor) && linkedEditor.CanUndo,
+            "visibility-only refresh replaced a linked editor, lost focus or cleared native text history");
+        RequireSelection(linkedEditor, linkedSelection, "linked visibility refresh");
+        linkedEditor.Undo();
+        Require(linkedEditor.Text == linkedText, "visibility refresh broke the linked editor's native undo");
 
         controller.State.RunLinkedScriptCapsulesOnClick = false;
         linkedWindow.RefreshLinkedPaperRowsForVisibility();
@@ -166,11 +177,11 @@ internal static class TodoVisibilityChecks
         await Idle();
         Require(!deferredWindow.IsShellBuilt && OptionalField(deferredWindow, "_todoPanel") == null,
             "hide-all built a deferred Todo body just to refresh linked-paper visibility");
-        RequireReconcile(linkedWindow, linkedBefore, LinkedIds, "hidden live Todo");
+        RequireReconcile(linkedWindow, linkedBefore, [], "hidden live Todo");
         RequireNoAppendArea(linkedWindow);
         foreach (var id in LinkedIds) RequireLinkActivity(linkedWindow, id, active: false);
 
-        Console.WriteLine("PASS todo visibility: ordinary row/editor/selection retention; one linked-row reconcile; active buttons and clicks; script/path links and normalized invalid links; disabled links and bottom bar; hidden/deferred bodies");
+        Console.WriteLine("PASS todo visibility: ordinary row/editor/selection retention; in-place linked-button updates; active buttons and clicks; script/path links and normalized invalid links; disabled links and bottom bar; hidden/deferred bodies");
     }
 
     private static PaperData Paper(string id, string type) => new()

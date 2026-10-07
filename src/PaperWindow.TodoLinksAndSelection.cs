@@ -1345,25 +1345,15 @@ public sealed partial class PaperWindow
             return;
         }
 
-        var affectedItemIds = _paper.Items
-            .Where(item => string.IsNullOrWhiteSpace(item.LinkedPath) &&
-                _controller.IsExistingPaper(item.LinkedPaperId))
-            .Select(item => item.Id)
-            .ToArray();
-        if (affectedItemIds.Length == 0)
+        // These existing callbacks only refresh the linked button's presentation. No row,
+        // editor, native text history, selection or append area needs rebuilding for visibility.
+        foreach (var refreshers in _linkedPaperTitleRefreshers.Values)
         {
-            return;
+            foreach (var refresh in refreshers.Values)
+            {
+                refresh();
+            }
         }
-
-        // Only linked-paper buttons cache the target's expanded visibility. Keep ordinary
-        // editors attached, including their selection; refocusing an unchanged editor would
-        // reset its caret to the end even though its row did not need rebuilding.
-        var focusedItemId = CurrentFocusedTodoItemId();
-        ReconcileTodoRows(
-            affectedItemIds,
-            affectedItemIds.Contains(focusedItemId, StringComparer.Ordinal)
-                ? focusedItemId
-                : null);
     }
 
     public void RefreshLinkedPaperRows(string? paperId)
