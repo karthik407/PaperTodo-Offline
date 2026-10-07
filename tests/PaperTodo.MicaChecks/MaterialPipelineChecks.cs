@@ -14,6 +14,7 @@ internal static class MaterialPipelineChecks
             "background reads use SRCCOPY without cursor-disrupting CAPTUREBLT");
         CheckPreparedMenu(controller);
         CheckCaptureExclusion();
+        CaptureCompletionChecks.Run();
         CheckStaticCapsuleProjection(controller);
     }
 
@@ -51,7 +52,49 @@ internal static class MaterialPipelineChecks
             Until(() => surface.IsBackgroundActive && !surface.HasBackgroundCapture,
                 "capsule receives one completed static snapshot");
 
+            var completedFrames = surface.BackgroundFrameCount;
+            var retainedBitmap = surface.BackgroundSessionState!.Bitmap;
+            var hwnd = new WindowInteropHelper(window).Handle;
+            surface.SetSampledBackgroundCaptureSuspended(true);
+            Program.Pump();
+            Program.Assert(
+                surface.SampledBackgroundCaptureSuspended &&
+                surface.IsBackgroundActive &&
+                ReferenceEquals(retainedBitmap, surface.BackgroundSessionState!.Bitmap) &&
+                !surface.HasBackgroundCapture &&
+                DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "proxy-owned source suspension keeps the presented material but releases capture affinity");
+
+            surface.SetSampledBackgroundCaptureSuspended(false);
+            Until(() => surface.BackgroundFrameCount > completedFrames &&
+                        surface.IsBackgroundActive &&
+                        !surface.HasBackgroundCapture,
+                "settled source resumes with one fresh local snapshot");
+            Program.Assert(
+                !surface.SampledBackgroundCaptureSuspended &&
+                DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "settled source leaves no capture exclusion behind");
+
             var session = surface.BackgroundSessionState!;
+            var pendingFrames = surface.BackgroundFrameCount;
+            var pendingBitmap = session.Bitmap;
+            session.GeometryChanged();
+            var pendingCapture = session.Capture;
+            Program.Assert(pendingCapture != null, "start a real capture before proxy ownership changes");
+            surface.SetSampledBackgroundCaptureSuspended(true);
+            Program.Assert(pendingCapture!.IsStopped && !surface.HasBackgroundCapture &&
+                DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "proxy admission immediately cancels an in-flight capture and releases affinity");
+            Program.Assert(pendingCapture.Completion.Wait(TimeSpan.FromSeconds(5)),
+                "cancelled capture worker drains without blocking a proxy lifetime");
+            Program.Pump();
+            Program.Assert(surface.BackgroundFrameCount == pendingFrames &&
+                ReferenceEquals(pendingBitmap, session.Bitmap),
+                "late cancelled capture completion cannot replace the retained material scene");
+            surface.SetSampledBackgroundCaptureSuspended(false);
+            Until(() => surface.BackgroundFrameCount > pendingFrames && !surface.HasBackgroundCapture,
+                "resuming after in-flight cancellation publishes one fresh snapshot");
+
             var bitmap = session.Bitmap;
             var frames = surface.BackgroundFrameCount;
             var projections = surface.BackgroundProjectionCount;
@@ -93,7 +136,7 @@ internal static class MaterialPipelineChecks
 
         Program.Assert(!surface.HasBackgroundCapture && !surface.HasMaterialHostSubscription,
             "closed static surface releases capture and host observation");
-        Console.WriteLine("PIPELINE: one-shot capture, retained projection and geometry refresh passed.");
+        Console.WriteLine("PIPELINE: one-shot capture, proxy suspension, retained projection and geometry refresh passed.");
     }
 
     private static void CheckPreparedMenu(AppController controller)
