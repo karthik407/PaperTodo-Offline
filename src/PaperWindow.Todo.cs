@@ -151,50 +151,103 @@ public sealed partial class PaperWindow
             .Where(row => row.Tag is string)
             .ToDictionary(row => (string)row.Tag, StringComparer.Ordinal);
         var orderedRows = new List<Border>(orderedItems.Count);
-        for (var index = 0; index < orderedItems.Count; index++)
+        foreach (var item in orderedItems)
         {
-            var item = orderedItems[index];
             if (!rowsById.TryGetValue(item.Id, out var row))
             {
                 row = BuildTodoRow(
                     item,
                     isNewItem: !existingIds.Contains(item.Id));
-                _todoPanel.Children.Insert(
-                    Math.Min(index, _todoPanel.Children.Count),
-                    row);
-            }
-            else
-            {
-                var currentIndex = _todoPanel.Children.IndexOf(row);
-                if (currentIndex != index)
-                {
-                    _todoPanel.Children.RemoveAt(currentIndex);
-                    _todoPanel.Children.Insert(index, row);
-                }
             }
             orderedRows.Add(row);
         }
 
+        // Keep the largest set of rows whose relative order is already correct.
+        // Moving the first item to the end should detach one row, not every other row.
+        var retainedRows = TodoRowsToKeepInPlace(orderedRows, _todoPanel.Children);
+        UIElement? nextRow = _appendArea != null &&
+            _todoPanel.Children.Count > 0 &&
+            ReferenceEquals(_todoPanel.Children[_todoPanel.Children.Count - 1], _appendArea)
+                ? _appendArea
+                : null;
+        for (var index = orderedRows.Count - 1; index >= 0; index--)
+        {
+            var row = orderedRows[index];
+            if (!retainedRows.Contains(row))
+            {
+                var nextIndex = nextRow != null
+                    ? _todoPanel.Children.IndexOf(nextRow)
+                    : _todoPanel.Children.Count;
+                var currentIndex = _todoPanel.Children.IndexOf(row);
+                if (currentIndex < 0 || currentIndex != nextIndex - 1)
+                {
+                    if (currentIndex >= 0)
+                    {
+                        _todoPanel.Children.RemoveAt(currentIndex);
+                        if (currentIndex < nextIndex)
+                        {
+                            nextIndex--;
+                        }
+                    }
+                    _todoPanel.Children.Insert(nextIndex, row);
+                }
+            }
+            nextRow = row;
+        }
+
         _todoRows.Clear();
         _todoRows.AddRange(orderedRows);
-        if (_appendArea == null || !_todoPanel.Children.Contains(_appendArea))
-        {
-            _todoPanel.Children.Add(BuildTodoAppendArea());
-        }
-        else
-        {
-            var appendIndex = _todoPanel.Children.IndexOf(_appendArea);
-            if (appendIndex != _todoPanel.Children.Count - 1)
-            {
-                _todoPanel.Children.RemoveAt(appendIndex);
-                _todoPanel.Children.Add(_appendArea);
-            }
-        }
+        SyncTodoAppendArea();
 
         if (!string.IsNullOrWhiteSpace(targetFocus))
         {
             FocusTodoItem(targetFocus, focusPlacement);
         }
+    }
+
+    private static HashSet<Border> TodoRowsToKeepInPlace(
+        IReadOnlyList<Border> orderedRows,
+        UIElementCollection children)
+    {
+        var currentIndices = new Dictionary<UIElement, int>();
+        for (var index = 0; index < children.Count; index++)
+        {
+            currentIndices.Add(children[index], index);
+        }
+
+        // Find a longest increasing subsequence of the rows' current visual indices.
+        // New and rebuilt rows have no visual index and must be inserted separately.
+        var tails = new int[orderedRows.Count];
+        var predecessors = new int[orderedRows.Count];
+        Array.Fill(predecessors, -1);
+        var length = 0;
+        for (var index = 0; index < orderedRows.Count; index++)
+        {
+            if (!currentIndices.TryGetValue(orderedRows[index], out var currentIndex))
+            {
+                continue;
+            }
+            var low = 0;
+            var high = length;
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                if (currentIndices[orderedRows[tails[middle]]] < currentIndex)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            if (low > 0) predecessors[index] = tails[low - 1];
+            tails[low] = index;
+            if (low == length) length++;
+        }
+
+        var retainedRows = new HashSet<Border>();
+        for (var index = length == 0 ? -1 : tails[length - 1]; index >= 0; index = predecessors[index])
+        {
+            retainedRows.Add(orderedRows[index]);
+        }
+        return retainedRows;
     }
 
     private void RemoveTodoRowRegistration(Border row)
@@ -708,14 +761,13 @@ public sealed partial class PaperWindow
             }
         };
 
-        ContextMenu CreateItemMenu()
+        MenuItem? PopulateItemMenu(ContextMenu itemMenu)
         {
-            if (TryCreateTodoSelectionContextMenu(item, row, out var selectedMenu))
+            if (TryPopulateTodoSelectionContextMenu(item, itemMenu))
             {
-                return selectedMenu;
+                return null;
             }
 
-            var itemMenu = CreateContextMenu();
             MenuItem? reminderMenu = null;
             itemMenu.Items.Add(MenuHeader(Strings.Get("MenuTodoItem")));
             if (hasLinkedPaper)
@@ -750,32 +802,53 @@ public sealed partial class PaperWindow
             itemMenu.Items.Add(MenuItem(Strings.Get("MenuDeleteItem"), (_, _) => RemoveItem(item)));
             itemMenu.Items.Add(MenuItem(Strings.Get("MenuClearDone"), (_, _) => ClearDoneItems()));
 
-            itemMenu.Opened += (_, _) =>
-            {
-                row.Background = HoverBrush;
-                if (reminderMenu != null)
-                {
-                    reminderMenu.IsEnabled = !item.Done;
-                }
-            };
-            itemMenu.Closed += (_, _) =>
-            {
-                if (!row.IsMouseOver)
-                {
-                    UpdateTodoRowBackground(row);
-                }
-            };
-
-            return itemMenu;
+            return reminderMenu;
         }
 
         void AttachItemContextMenu(FrameworkElement element)
         {
-            element.ContextMenu = CreateItemMenu();
+            // WPF needs a non-null menu before ContextMenuOpening to open on the first
+            // mouse or keyboard request. Populate the same instance: TextBox's class
+            // handler attaches its Closed cleanup before our Opening handler runs.
+            var menu = new MaterialContextMenu();
+            var initialized = false;
+            MenuItem? reminderMenu = null;
+            element.ContextMenu = menu;
+            element.ContextMenuOpening += (_, e) =>
+            {
+                // The event bubbles through the row as well as the clicked child. Only
+                // the nearest owner fills its menu; the window can then append its actions.
+                if (!ReferenceEquals(element.ContextMenu, menu) || !ReferenceEquals(
+                        FindContextMenuOwner(e.OriginalSource as DependencyObject, this),
+                        element))
+                {
+                    return;
+                }
+
+                if (!initialized)
+                {
+                    InitializeContextMenu(menu);
+                    menu.Opened += (_, _) =>
+                    {
+                        row.Background = _selectedTodoItemIds.Count > 1 && _selectedTodoItemIds.Contains(item.Id)
+                            ? TodoSelectionBrush
+                            : HoverBrush;
+                        if (reminderMenu != null)
+                        {
+                            reminderMenu.IsEnabled = !item.Done;
+                        }
+                    };
+                    menu.Closed += (_, _) => UpdateTodoRowBackground(row);
+                    initialized = true;
+                }
+
+                PrepareTodoSelectionForContextMenu(item.Id);
+                menu.Items.Clear();
+                reminderMenu = PopulateItemMenu(menu);
+            };
             element.PreviewMouseRightButtonDown += (_, _) =>
             {
                 PrepareTodoSelectionForContextMenu(item.Id);
-                element.ContextMenu = CreateItemMenu();
                 text.Focus();
             };
         }
@@ -2339,13 +2412,7 @@ public sealed partial class PaperWindow
         var previousItems = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
 
-        _paper.Items = previousItems;
-        NormalizeTodoItems();
-        NormalizeOrders();
-        _controller.MarkDirty();
-        _controller.NotifyTodoReminderCollectionChanged();
-
-        RebuildTodoRows(focusedId);
+        RestoreTodoHistorySnapshot(previousItems, focusedId);
         RefreshCapsuleEligibilityForLinkedPaperChanges(currentItems);
     }
 
@@ -2364,15 +2431,79 @@ public sealed partial class PaperWindow
         var nextItems = _redoStack[^1];
         _redoStack.RemoveAt(_redoStack.Count - 1);
 
-        _paper.Items = nextItems;
+        RestoreTodoHistorySnapshot(nextItems, focusedId);
+        RefreshCapsuleEligibilityForLinkedPaperChanges(currentItems);
+    }
+
+    private void RestoreTodoHistorySnapshot(List<PaperItem> snapshot, string? focusedId)
+    {
+        var currentById = _paper.Items.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var rebuildIds = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < snapshot.Count; index++)
+        {
+            var restored = snapshot[index];
+            if (currentById.TryGetValue(restored.Id, out var current) &&
+                TodoHistoryRowContentEquals(current, restored))
+            {
+                // Retained row handlers close over this exact model instance. Replacing it
+                // with an equal snapshot would leave subsequent edits writing to a stale item.
+                snapshot[index] = current;
+            }
+            else
+            {
+                rebuildIds.Add(restored.Id);
+            }
+        }
+
+        var retainedFocus = focusedId != null &&
+            !rebuildIds.Contains(focusedId) &&
+            snapshot.Any(item => item.Id == focusedId) &&
+            _todoEditors.ContainsKey(focusedId);
+
+        // Applying history is not a new human edit. Row removal/reordering may raise LostFocus;
+        // an unchanged focused editor, on the other hand, will not raise GotFocus again.
+        _activeOriginalItemId = null;
+        _activeOriginalText = null;
+        _pendingFocusItemId = null;
+        _paper.Items = snapshot;
         NormalizeTodoItems();
         NormalizeOrders();
         _controller.MarkDirty();
         _controller.NotifyTodoReminderCollectionChanged();
+        ReconcileTodoRows(rebuildIds, retainedFocus ? null : focusedId);
 
-        RebuildTodoRows(focusedId);
-        RefreshCapsuleEligibilityForLinkedPaperChanges(currentItems);
+        // The former full rebuild reset native TextBox history. Keep that paper-history
+        // boundary so a retained editor cannot replay stale local edits ahead of Ctrl+Y/Z.
+        foreach (var editor in _todoEditors.Values)
+        {
+            if (editor.IsUndoEnabled)
+            {
+                editor.SetCurrentValue(TextBoxBase.IsUndoEnabledProperty, false);
+                editor.SetCurrentValue(TextBoxBase.IsUndoEnabledProperty, true);
+            }
+        }
+        if (retainedFocus && _todoEditors.TryGetValue(focusedId!, out var focusedEditor))
+        {
+            // A reorder can detach and reinsert the focused row. Restore its keyboard focus
+            // without moving the caret or replacing its selection as FocusTodoItem would.
+            if (!focusedEditor.IsKeyboardFocused)
+            {
+                focusedEditor.Focus();
+            }
+            _activeOriginalItemId = focusedId;
+            _activeOriginalText = focusedEditor.Text;
+        }
     }
+
+    private static bool TodoHistoryRowContentEquals(PaperItem current, PaperItem restored) =>
+        current.Text == restored.Text &&
+        current.Done == restored.Done &&
+        current.LinkedPaperId == restored.LinkedPaperId &&
+        current.LinkedPath == restored.LinkedPath &&
+        current.LinkedPathIsDirectory == restored.LinkedPathIsDirectory &&
+        current.ReminderAt == restored.ReminderAt &&
+        current.ReminderAt?.Offset == restored.ReminderAt?.Offset &&
+        current.ReminderTriggered == restored.ReminderTriggered;
 
     private bool TryCollapseExpandedPaperFromEscape()
     {
