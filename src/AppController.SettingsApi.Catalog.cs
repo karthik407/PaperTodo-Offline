@@ -19,11 +19,6 @@ public sealed partial class AppController
             value => State.AdvancedSettingsMode = value,
             SettingEffects.Advanced,
             title: Strings.Get("SettingsAdvancedMode"));
-        yield return DefineSetting<bool>("privacy.anonymous_usage",
-            () => State.TelemetryEnabled,
-            value => State.TelemetryEnabled = value,
-            SettingEffects.Telemetry,
-            title: TelemetryStrings.Get("HelpImprove"));
         yield return DefineSetting<bool>("general.tooltips",
             () => State.EnableToolTips,
             value => State.EnableToolTips = value,

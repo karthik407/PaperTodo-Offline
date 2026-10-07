@@ -154,10 +154,6 @@ public sealed partial class AppController
                 ToggleAnimations),
             "TipEnableAnimations"));
 
-        leftColumn.Children.Add(BuildSettingsLiveRegion(
-            "general.telemetry",
-            CreateAnonymousUsageStatisticsSettingsRow));
-
         if (State.AdvancedSettingsMode)
         {
             leftColumn.Children.Add(SettingsSectionLabel(
@@ -262,16 +258,4 @@ public sealed partial class AppController
         }
         RefreshSettingsWindowContent();
     }
-
-
-    private UIElement CreateAnonymousUsageStatisticsSettingsRow() =>
-        WrapWithHint(
-            SettingsToggle(
-                TelemetryStrings.Get("HelpImprove"),
-                State.TelemetryEnabled,
-                ToggleAnonymousUsageStatistics),
-            BuildSettingsHintTooltip(TelemetryStrings.Get("Description")));
-
-    private void ToggleAnonymousUsageStatistics() =>
-        SetSettingFromUi("privacy.anonymous_usage", !State.TelemetryEnabled);
 }
