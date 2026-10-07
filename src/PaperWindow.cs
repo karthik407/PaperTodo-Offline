@@ -1815,7 +1815,9 @@ public sealed partial class PaperWindow : Window
         var transitionBrush = new SolidColorBrush(from);
         assignBrush(transitionBrush);
 
-        var animation = new System.Windows.Media.Animation.ColorAnimation(to, TimeSpan.FromMilliseconds(300))
+        var animation = new System.Windows.Media.Animation.ColorAnimation(
+            to,
+            TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(300)))
         {
             EasingFunction = AnimationHelper.SmoothEase
         };
@@ -2913,7 +2915,9 @@ public sealed partial class PaperWindow : Window
             EnsureExpandedSurfaceGeometry(alignToDockedEdge: true);
         }
 
-        var delay = Math.Max(ExpandAnimationMilliseconds, CollapseResizeMilliseconds) + 30;
+        var delay = Math.Max(
+            AnimationTiming.ScaleMilliseconds(ExpandAnimationMilliseconds),
+            AnimationTiming.ScaleMilliseconds(CollapseResizeMilliseconds)) + 30;
         var timer = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(delay)
@@ -3478,12 +3482,17 @@ public sealed partial class PaperWindow : Window
         var visualWidth = _startTransitionWidth + (_targetTransitionWidth - _startTransitionWidth) * currentProgress;
         var visualHeight = _startTransitionHeight + (_targetTransitionHeight - _startTransitionHeight) * currentProgress;
         var nativeWindow = _controller.UsesNativeMicaWindows;
+        var pixelWidth = 0;
+        var pixelHeight = 0;
         if (nativeWindow)
         {
             // WM_SIZE reports whole physical pixels back to WPF. Round before deriving the
-            // inner bounds, so that callback cannot leave the paper half a pixel behind.
-            visualWidth = RoundToDevicePixelX(visualWidth);
-            visualHeight = RoundToDevicePixelY(visualHeight);
+            // inner bounds, using the same DPI and rectangle for the shell and native commit.
+            var dpi = VisualTreeHelper.GetDpi(this);
+            pixelWidth = Math.Max(1, (int)Math.Round(visualWidth * dpi.DpiScaleX, MidpointRounding.AwayFromZero));
+            pixelHeight = Math.Max(1, (int)Math.Round(visualHeight * dpi.DpiScaleY, MidpointRounding.AwayFromZero));
+            visualWidth = pixelWidth / dpi.DpiScaleX;
+            visualHeight = pixelHeight / dpi.DpiScaleY;
         }
         var margin = nativeWindow
             ? _startTransitionChromeMargin + (_targetTransitionChromeMargin - _startTransitionChromeMargin) * currentProgress
@@ -3496,13 +3505,7 @@ public sealed partial class PaperWindow : Window
 
         if (nativeWindow)
         {
-            // Apply one frame from the same progress value. The backdrop must never infer
-            // HWND bounds from LayoutUpdated/inner Width callbacks or lower our minimum size.
             _paperChrome.Margin = new Thickness(margin);
-            MinWidth = Math.Min(PaperLayoutDefaults.MinWidth, visualWidth);
-            MinHeight = Math.Min(PaperLayoutDefaults.MinHeight, visualHeight);
-            Width = visualWidth;
-            Height = visualHeight;
         }
 
         _paperChrome.HorizontalAlignment = HorizontalAlignment.Left;
@@ -3514,6 +3517,14 @@ public sealed partial class PaperWindow : Window
         _shellScale.ScaleX = Math.Max(0.01, (visualChromeWidth - borderX) / Math.Max(1, baseChromeWidth - borderX));
         _shellScale.ScaleY = Math.Max(0.01, (visualChromeHeight - borderY) / Math.Max(1, baseChromeHeight - borderY));
         UpdateTransitionCornerRadius(visualChromeWidth, visualChromeHeight, baseChromeWidth, baseChromeHeight);
+
+        // Publish the inner frame before WM_SIZE can synchronously run layout. Separate WPF
+        // Width/Height (and growing minimums) otherwise submit intermediate one-axis HWNDs.
+        if (nativeWindow && !WindowNative.TrySetWindowDeviceSize(this, pixelWidth, pixelHeight))
+        {
+            Width = visualWidth;
+            Height = visualHeight;
+        }
     }
 
     private void ResetTransitionVisuals()
