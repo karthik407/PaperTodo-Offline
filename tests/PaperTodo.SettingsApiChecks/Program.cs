@@ -389,6 +389,82 @@ internal static partial class Program
 
     private static async Task PipeAndUnlinkBehavior()
     {
+        var wrongTodoShape = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "add_todos",
+            Arguments = new Dictionary<string, JsonElement>
+            {
+                ["paper_id"] = Json("paper"),
+                ["todos"] = Json(new[] { "first", "second" })
+            }
+        };
+        Check(
+            McpBridge.TryDescribeInvalidToolArguments(
+                wrongTodoShape,
+                out var wrongTodoShapeMessage) &&
+            wrongTodoShapeMessage.Contains(
+                "invalid_params",
+                StringComparison.Ordinal) &&
+            wrongTodoShapeMessage.Contains(
+                "todos[0]",
+                StringComparison.Ordinal),
+            "MCP binding errors identify the invalid collection item.");
+
+        var missingTodoText = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "add_todos",
+            Arguments = new Dictionary<string, JsonElement>
+            {
+                ["paper_id"] = Json("paper"),
+                ["todos"] = Json(new[] { new { done = false } })
+            }
+        };
+        Check(
+            McpBridge.TryDescribeInvalidToolArguments(
+                missingTodoText,
+                out var missingTodoTextMessage) &&
+            missingTodoTextMessage.Contains(
+                "text",
+                StringComparison.Ordinal),
+            "MCP binding errors identify missing nested required fields.");
+
+        var toolTarget = new McpTools(new McpPipeClient("unused"));
+        var updateTool = ModelContextProtocol.Server.McpServerTool.Create(
+            typeof(McpTools).GetMethod(nameof(McpTools.UpdateTodo))!,
+            toolTarget);
+        Check(
+            updateTool.ProtocolTool.InputSchema
+                .GetProperty("properties")
+                .TryGetProperty("order", out _),
+            "MCP update_todo schema exposes order.");
+
+        var createNoteTool = ModelContextProtocol.Server.McpServerTool.Create(
+            typeof(McpTools).GetMethod(nameof(McpTools.CreateNote))!,
+            toolTarget);
+        var createNoteTitleSchema = createNoteTool.ProtocolTool.InputSchema
+            .GetProperty("properties")
+            .GetProperty("title");
+        Check(
+            createNoteTitleSchema
+                .GetProperty("description")
+                .GetString()?
+                .Contains("title.max_length", StringComparison.Ordinal) == true &&
+            !createNoteTitleSchema.TryGetProperty("maxLength", out _),
+            "MCP create_note schema describes the dynamic title limit without advertising a false fixed maxLength.");
+
+        var validTodoShape = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "add_todos",
+            Arguments = new Dictionary<string, JsonElement>
+            {
+                ["paper_id"] = Json("paper"),
+                ["todos"] = Json(new[] { new { text = "first", done = false } })
+            }
+        };
+        Check(
+            !McpBridge.TryDescribeInvalidToolArguments(validTodoShape, out _),
+            "MCP error translation leaves valid tool arguments alone.");
+
         var name = "PaperTodo.SettingsChecks." + Guid.NewGuid().ToString("N");
         var requests = new List<JsonElement>();
         McpApiHost? host = null;
@@ -404,6 +480,8 @@ internal static partial class Program
             var tools = new McpTools(new McpPipeClient(name));
             await tools.UpdateTodo("paper", "todo", text: "short");
             Check(!requests[^1].GetProperty("params").TryGetProperty("linked_paper_id", out _), "Omitted link is omitted on the real pipe.");
+            await tools.UpdateTodo("paper", "todo", order: 0);
+            Check(requests[^1].GetProperty("params").GetProperty("order").GetInt32() == 0, "Todo order survives actual tool serialization.");
             await tools.UpdateTodo("paper", "todo", linked_paper_id: "note");
             Check(requests[^1].GetProperty("params").GetProperty("linked_paper_id").GetString() == "note", "Binding survives actual tool serialization.");
             await tools.UpdateTodo("paper", "todo", clear_linked_paper: true);
