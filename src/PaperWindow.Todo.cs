@@ -177,19 +177,7 @@ public sealed partial class PaperWindow
 
         _todoRows.Clear();
         _todoRows.AddRange(orderedRows);
-        if (_appendArea == null || !_todoPanel.Children.Contains(_appendArea))
-        {
-            _todoPanel.Children.Add(BuildTodoAppendArea());
-        }
-        else
-        {
-            var appendIndex = _todoPanel.Children.IndexOf(_appendArea);
-            if (appendIndex != _todoPanel.Children.Count - 1)
-            {
-                _todoPanel.Children.RemoveAt(appendIndex);
-                _todoPanel.Children.Add(_appendArea);
-            }
-        }
+        SyncTodoAppendArea();
 
         if (!string.IsNullOrWhiteSpace(targetFocus))
         {

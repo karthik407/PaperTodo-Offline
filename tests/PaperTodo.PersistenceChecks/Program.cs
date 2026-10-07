@@ -4,6 +4,11 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using PaperTodo;
 
+if (args is ["--plugin-io-audit", var auditOutput])
+{
+    return PluginIoAudit.Run(auditOutput);
+}
+
 var checks = new (string Name, Action Run)[]
 {
     ("primary-save-faults-keep-a-loadable-generation", PrimarySaveFaultsKeepALoadableGeneration),
@@ -18,6 +23,11 @@ var checks = new (string Name, Action Run)[]
     ("plugin-system-shutdown-skips-final-flush", PluginSystemShutdownSkipsFinalFlush),
     ("plugin-normal-dispose-still-final-flushes", PluginNormalDisposeStillFinalFlushes),
     ("plugin-save-failure-retry-is-bounded", PluginSaveFailureRetryIsBounded),
+    ("plugin-blocked-write-keeps-cached-state-available", PluginPersistenceConcurrencyChecks.BlockedWriteKeepsCachedStateAvailable),
+    ("plugin-old-snapshot-cannot-restore-deleted-paper", PluginPersistenceConcurrencyChecks.OldSnapshotCannotRestoreDeletedPaper),
+    ("plugin-old-failure-does-not-spend-new-mutation-retry", PluginPersistenceConcurrencyChecks.OldFailureDoesNotSpendNewMutationRetry),
+    ("plugin-dispose-waits-and-flushes-latest-state", PluginPersistenceConcurrencyChecks.DisposeWaitsAndFlushesLatestState),
+    ("plugin-suppression-stops-writes-after-returning", PluginPersistenceConcurrencyChecks.SuppressionStopsWritesAfterReturning),
     ("shutdown-skips-deferred-plugin-cleanup", ShutdownSkipsDeferredPluginCleanup),
     ("temp-validator-failure-keeps-old-target", TempValidatorFailureKeepsOldTarget),
     ("flush-failure-keeps-old-target", FlushFailureKeepsOldTarget),

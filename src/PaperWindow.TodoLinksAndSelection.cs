@@ -1336,6 +1336,36 @@ public sealed partial class PaperWindow
     }
 
 
+    internal void RefreshLinkedPaperRowsForVisibility()
+    {
+        if (_paper.Type != PaperTypes.Todo ||
+            _todoPanel == null ||
+            !_controller.State.EnableTodoPaperLinks)
+        {
+            return;
+        }
+
+        var affectedItemIds = _paper.Items
+            .Where(item => string.IsNullOrWhiteSpace(item.LinkedPath) &&
+                _controller.IsExistingPaper(item.LinkedPaperId))
+            .Select(item => item.Id)
+            .ToArray();
+        if (affectedItemIds.Length == 0)
+        {
+            return;
+        }
+
+        // Only linked-paper buttons cache the target's expanded visibility. Keep ordinary
+        // editors attached, including their selection; refocusing an unchanged editor would
+        // reset its caret to the end even though its row did not need rebuilding.
+        var focusedItemId = CurrentFocusedTodoItemId();
+        ReconcileTodoRows(
+            affectedItemIds,
+            affectedItemIds.Contains(focusedItemId, StringComparer.Ordinal)
+                ? focusedItemId
+                : null);
+    }
+
     public void RefreshLinkedPaperRows(string? paperId)
     {
         if (_paper.Type != PaperTypes.Todo ||
