@@ -43,7 +43,7 @@ internal sealed partial class McpTools
         ReadOnly = true,
         Destructive = false,
         OpenWorld = false)]
-    [Description("List PaperTodo papers and compact metadata. Use this first to discover paper IDs.")]
+    [Description("List PaperTodo papers and compact metadata. Each result exposes its identifier as both id and paper_id; pass paper_id to tools that target a paper.")]
     public Task<JsonElement> ListPapers(
         [Description("Optional filter: 'todo' or 'note'.")] string? type = null,
         CancellationToken cancellationToken = default)
@@ -73,7 +73,7 @@ internal sealed partial class McpTools
         OpenWorld = false)]
     [Description("Create a new todo paper. Requires PaperTodo blank/additive writes.")]
     public Task<JsonElement> CreateTodoPaper(
-        [Description("Optional paper title.")] string? title = null,
+        [Description("Optional paper title. Limited by the current PaperTodo title.max_length setting (default 6, configurable from 2 to 20 displayed characters). For normal short titles, do not query the setting first; if rejected, the error reports the active limit.")] string? title = null,
         [Description("Optional ordered todo steps.")] IReadOnlyList<McpTodoInput>? todos = null,
         [Description("Show the new paper immediately.")] bool show = true,
         CancellationToken cancellationToken = default)
@@ -89,7 +89,7 @@ internal sealed partial class McpTools
         OpenWorld = false)]
     [Description("Create a new note with optional Markdown content. Requires PaperTodo blank/additive writes.")]
     public Task<JsonElement> CreateNote(
-        [Description("Optional paper title.")] string? title = null,
+        [Description("Optional paper title. Limited by the current PaperTodo title.max_length setting (default 6, configurable from 2 to 20 displayed characters). For normal short titles, do not query the setting first; if rejected, the error reports the active limit.")] string? title = null,
         [Description("Initial note content.")] string content = "",
         [Description("Show the new paper immediately.")] bool show = true,
         CancellationToken cancellationToken = default)
@@ -119,18 +119,19 @@ internal sealed partial class McpTools
         Destructive = true,
         Idempotent = true,
         OpenWorld = false)]
-    [Description("Fill or replace todo text, change completion state, and/or link another PaperTodo paper. Filling blank text needs additive writes; replacing existing text/state or changing a paper link needs full writes.")]
+    [Description("Fill or replace todo text, change completion state, reorder the item, and/or link another PaperTodo paper. Filling blank text needs additive writes; replacing existing text/state, reordering, or changing a paper link needs full writes.")]
     public Task<JsonElement> UpdateTodo(
         [Description("Exact todo paper ID.")] string paper_id,
         [Description("Exact todo item ID.")] string todo_id,
         [Description("Replacement text. Omit to keep text unchanged.")] string? text = null,
         [Description("Replacement completion state. Omit to keep it unchanged.")] bool? done = null,
+        [Description("Zero-based target position within the todo paper. Values outside the current range are clamped; PaperTodo's completed-item ordering rules still apply. Omit to keep the current order. Requires full writes.")] int? order = null,
         [Description("Paper ID to link from this todo, such as a Note containing longer details. Omit to keep the current link unchanged. Requires PaperTodo full writes.")] string? linked_paper_id = null,
         [Description("Set true to unlink the todo's linked Paper without deleting the Note. Mutually exclusive with linked_paper_id. Requires full writes.")] bool clear_linked_paper = false,
         CancellationToken cancellationToken = default)
         => _client.InvokeAsync(
             "update_todo",
-            OptionalUpdateParameters(paper_id, todo_id, text, done, linked_paper_id, clear_linked_paper),
+            OptionalUpdateParameters(paper_id, todo_id, text, done, order, linked_paper_id, clear_linked_paper),
             cancellationToken);
 
     [McpServerTool(
@@ -202,6 +203,7 @@ internal sealed partial class McpTools
         string todoId,
         string? text,
         bool? done,
+        int? order,
         string? linkedPaperId,
         bool clearLinkedPaper = false)
     {
@@ -219,6 +221,10 @@ internal sealed partial class McpTools
         if (done.HasValue)
         {
             parameters["done"] = done.Value;
+        }
+        if (order.HasValue)
+        {
+            parameters["order"] = order.Value;
         }
         if (linkedPaperId != null || clearLinkedPaper)
         {

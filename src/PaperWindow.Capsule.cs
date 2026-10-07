@@ -816,6 +816,18 @@ var expandedHeight = collapsed
             // expanded native papers target edge-to-edge chrome.
             _targetTransitionChromeMargin = UsesNativePaperChrome ? 0 : WindowChromeMargin;
 
+            if (_controller.UsesNativeMicaWindows)
+            {
+                // Minimum changes can resize a live WPF HWND immediately. Establish the
+                // animation's lower bounds once; completion/settle restores the final policy.
+                MinWidth = Math.Min(PaperLayoutDefaults.MinWidth,
+                    Math.Min(RoundToDevicePixelX(_startTransitionWidth),
+                        RoundToDevicePixelX(_targetTransitionWidth)));
+                MinHeight = Math.Min(PaperLayoutDefaults.MinHeight,
+                    Math.Min(RoundToDevicePixelY(_startTransitionHeight),
+                        RoundToDevicePixelY(_targetTransitionHeight)));
+            }
+
             // Establish the initial visual BEFORE native placement can resize the HWND and
             // synchronously run WPF layout. Otherwise the full-size chrome is exposed first,
             // then reset to capsule size when the expand animation starts.
@@ -942,8 +954,11 @@ var expandedHeight = collapsed
             {
                 From = 0.0,
                 To = 1.0,
-                Duration = TimeSpan.FromMilliseconds(collapsed ? CollapseResizeMilliseconds : ExpandAnimationMilliseconds),
-                BeginTime = collapsed ? TimeSpan.FromMilliseconds(CollapseShellFadeMilliseconds) : TimeSpan.Zero,
+                Duration = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(
+                    collapsed ? CollapseResizeMilliseconds : ExpandAnimationMilliseconds)),
+                BeginTime = collapsed
+                    ? TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(CollapseShellFadeMilliseconds))
+                    : TimeSpan.Zero,
                 EasingFunction = easeOut
             };
 
@@ -956,7 +971,7 @@ var expandedHeight = collapsed
                 {
                     From = 1.0,
                     To = 0.0,
-                    Duration = TimeSpan.FromMilliseconds(CollapseShellFadeMilliseconds),
+                    Duration = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(CollapseShellFadeMilliseconds)),
                     EasingFunction = easeOut
                 };
                 _shell.BeginAnimation(UIElement.OpacityProperty, fadeOutShell);
@@ -965,8 +980,8 @@ var expandedHeight = collapsed
                 {
                     From = 0.0,
                     To = 1.0,
-                    Duration = TimeSpan.FromMilliseconds(CollapseResizeMilliseconds),
-                    BeginTime = TimeSpan.FromMilliseconds(CollapseShellFadeMilliseconds),
+                    Duration = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(CollapseResizeMilliseconds)),
+                    BeginTime = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(CollapseShellFadeMilliseconds)),
                     EasingFunction = easeOut
                 };
                 _capsuleShell.BeginAnimation(UIElement.OpacityProperty, fadeInCapsule);
@@ -981,7 +996,7 @@ var expandedHeight = collapsed
                 {
                     From = 1.0,
                     To = 0.0,
-                    Duration = TimeSpan.FromMilliseconds(ExpandCapsuleFadeOutMilliseconds),
+                    Duration = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(ExpandCapsuleFadeOutMilliseconds)),
                     EasingFunction = easeOut
                 };
                 _capsuleShell.BeginAnimation(UIElement.OpacityProperty, fadeOutCapsule);
@@ -990,8 +1005,8 @@ var expandedHeight = collapsed
                 {
                     From = 0.0,
                     To = 1.0,
-                    Duration = TimeSpan.FromMilliseconds(ExpandShellFadeInMilliseconds),
-                    BeginTime = TimeSpan.FromMilliseconds(ExpandCapsuleFadeOutMilliseconds),
+                    Duration = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(ExpandShellFadeInMilliseconds)),
+                    BeginTime = TimeSpan.FromMilliseconds(AnimationTiming.ScaleMilliseconds(ExpandCapsuleFadeOutMilliseconds)),
                     EasingFunction = easeOut
                 };
                 _shell.BeginAnimation(UIElement.OpacityProperty, fadeInShell);
