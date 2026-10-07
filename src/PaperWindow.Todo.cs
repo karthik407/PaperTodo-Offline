@@ -162,37 +162,42 @@ public sealed partial class PaperWindow
             orderedRows.Add(row);
         }
 
-        // Keep the largest set of rows whose relative order is already correct.
-        // Moving the first item to the end should detach one row, not every other row.
-        var retainedRows = TodoRowsToKeepInPlace(orderedRows, _todoPanel.Children);
-        UIElement? nextRow = _appendArea != null &&
-            _todoPanel.Children.Count > 0 &&
-            ReferenceEquals(_todoPanel.Children[_todoPanel.Children.Count - 1], _appendArea)
-                ? _appendArea
-                : null;
-        for (var index = orderedRows.Count - 1; index >= 0; index--)
+        // Most visibility/content refreshes keep the same visual row order. Avoid allocating
+        // the LIS index, predecessor arrays and retained set when nothing needs moving.
+        if (!TodoRowsAreInPlace(orderedRows, _todoPanel.Children))
         {
-            var row = orderedRows[index];
-            if (!retainedRows.Contains(row))
+            // Keep the largest set of rows whose relative order is already correct.
+            // Moving the first item to the end should detach one row, not every other row.
+            var retainedRows = TodoRowsToKeepInPlace(orderedRows, _todoPanel.Children);
+            UIElement? nextRow = _appendArea != null &&
+                _todoPanel.Children.Count > 0 &&
+                ReferenceEquals(_todoPanel.Children[_todoPanel.Children.Count - 1], _appendArea)
+                    ? _appendArea
+                    : null;
+            for (var index = orderedRows.Count - 1; index >= 0; index--)
             {
-                var nextIndex = nextRow != null
-                    ? _todoPanel.Children.IndexOf(nextRow)
-                    : _todoPanel.Children.Count;
-                var currentIndex = _todoPanel.Children.IndexOf(row);
-                if (currentIndex < 0 || currentIndex != nextIndex - 1)
+                var row = orderedRows[index];
+                if (!retainedRows.Contains(row))
                 {
-                    if (currentIndex >= 0)
+                    var nextIndex = nextRow != null
+                        ? _todoPanel.Children.IndexOf(nextRow)
+                        : _todoPanel.Children.Count;
+                    var currentIndex = _todoPanel.Children.IndexOf(row);
+                    if (currentIndex < 0 || currentIndex != nextIndex - 1)
                     {
-                        _todoPanel.Children.RemoveAt(currentIndex);
-                        if (currentIndex < nextIndex)
+                        if (currentIndex >= 0)
                         {
-                            nextIndex--;
+                            _todoPanel.Children.RemoveAt(currentIndex);
+                            if (currentIndex < nextIndex)
+                            {
+                                nextIndex--;
+                            }
                         }
+                        _todoPanel.Children.Insert(nextIndex, row);
                     }
-                    _todoPanel.Children.Insert(nextIndex, row);
                 }
+                nextRow = row;
             }
-            nextRow = row;
         }
 
         _todoRows.Clear();
@@ -203,6 +208,18 @@ public sealed partial class PaperWindow
         {
             FocusTodoItem(targetFocus, focusPlacement);
         }
+    }
+
+    private static bool TodoRowsAreInPlace(
+        IReadOnlyList<Border> orderedRows,
+        UIElementCollection children)
+    {
+        if (children.Count < orderedRows.Count) return false;
+        for (var index = 0; index < orderedRows.Count; index++)
+        {
+            if (!ReferenceEquals(children[index], orderedRows[index])) return false;
+        }
+        return true;
     }
 
     private static HashSet<Border> TodoRowsToKeepInPlace(

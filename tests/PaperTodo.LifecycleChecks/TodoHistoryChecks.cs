@@ -50,6 +50,31 @@ internal static class TodoHistoryChecks
         var panel = InstallCountingPanel(window);
         await Idle();
 
+        // Ordinary single-paper lists must preserve live editors and focus even when the
+        // no-move path skips the LIS. Also cover append-area synchronization on that path.
+        foreach (var count in new[] { 1, 5, 10 })
+        {
+            await Reset(count);
+            var unchanged = Capture(window, paper);
+            var focused = Editors(window)["row-0"];
+            focused.Select(2, 4);
+            var caret = (focused.SelectionStart, focused.SelectionLength, focused.CaretIndex);
+            panel.ResetCounts();
+            ReconcileRows(window);
+            await Idle();
+            RequireVisualChanges(panel, 0, 0, $"{count}-row unchanged refresh");
+            RequireRetained(unchanged, window, paper, [], $"{count}-row unchanged refresh");
+            RequireSelection(focused, caret, $"{count}-row unchanged refresh");
+            Require(focused.IsKeyboardFocused, "unchanged small-list refresh lost keyboard focus");
+            controller.State.ShowTodoBottomBar = true;
+            ReconcileRows(window);
+            Require(panel.Children.Count == count + 1, "no-move refresh failed to enable append area");
+            controller.State.ShowTodoBottomBar = false;
+            ReconcileRows(window);
+            RequireNoAppendArea(window);
+        }
+        await Reset(12);
+
         // Pure reorder changes list position, not the models captured by row event handlers.
         var originalOrder = paper.Items.Select(item => item.Id).ToArray();
         var move = typeof(PaperWindow).GetMethod("MoveItems", Private)!;
