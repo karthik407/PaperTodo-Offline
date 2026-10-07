@@ -216,6 +216,11 @@ internal sealed partial class EdgeCapsuleDragWindow : Window
         }
     }
 
+    internal void BeginDragBackground()
+    {
+        if (_paperBackground is SkinBorder skin) skin.BeginDragBackground();
+    }
+
     internal void UseDragBackground(DesktopBackgroundCapture.Snapshot snapshot)
     {
         if (_paperBackground is SkinBorder skin) skin.UseDragBackground(snapshot);

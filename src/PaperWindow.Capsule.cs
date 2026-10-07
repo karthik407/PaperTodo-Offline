@@ -53,6 +53,11 @@ public sealed partial class PaperWindow
 
         var capture = new CancellationTokenSource();
         _capsuleDragBackgroundCapture = capture;
+        if (_capsulePointerState == CapsulePointerState.NativeMoving &&
+            _paperChrome is SkinBorder paperSurface)
+            paperSurface.BeginDragBackground();
+        if (IsDeepCapsuleReordering)
+            _edgeCapsuleHost?.BeginDragBackground();
         _ = PrepareCapsuleDragBackgroundAsync(excludeHwnd, capture);
     }
 
@@ -60,6 +65,7 @@ public sealed partial class PaperWindow
         IntPtr excludeHwnd,
         CancellationTokenSource capture)
     {
+        var retained = false;
         try
         {
             var snapshot = await DesktopBackgroundCapture.PrepareDragAsync(
@@ -67,13 +73,17 @@ public sealed partial class PaperWindow
                 capture.Token);
             if (snapshot == null ||
                 capture.IsCancellationRequested ||
-                !ReferenceEquals(capture, _capsuleDragBackgroundCapture))
+                !ReferenceEquals(capture, _capsuleDragBackgroundCapture) ||
+                !_controller.State.MatchAuxiliaryMaterialStrength ||
+                !PaperSkins.UsesSampledAuxiliary(Theme.Skin) ||
+                SystemParameters.HighContrast || !DwmMicaApi.Instance.EffectsEnabled)
             {
                 return;
             }
 
             _capsuleDragBackgroundSnapshot = snapshot;
             ApplyCapsuleDragBackground(snapshot);
+            retained = true;
         }
         catch (OperationCanceledException)
         {
@@ -81,12 +91,12 @@ public sealed partial class PaperWindow
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or
             InvalidOperationException or ExternalException or ArgumentException or NotSupportedException)
         {
-            if (ReferenceEquals(capture, _capsuleDragBackgroundCapture))
-            {
-                _capsuleDragBackgroundCapture = null;
-                capture.Dispose();
-            }
             Debug.WriteLine("Capsule drag background unavailable; keeping the live material: " + ex.Message);
+        }
+        finally
+        {
+            if (!retained && ReferenceEquals(capture, _capsuleDragBackgroundCapture))
+                EndCapsuleDragBackground();
         }
     }
 

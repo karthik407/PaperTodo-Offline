@@ -283,6 +283,8 @@ public sealed partial class PaperWindow
         _deepCapsuleFloatingFullscreenAvoidanceWindow = IntPtr.Zero;
         try
         {
+            if (_capsuleDragBackgroundCapture != null)
+                host.BeginDragBackground();
             // No entrance morph on pull-out: the HWND must be ready for caption drag immediately.
             // A 90ms scale-in here only delays ownership hand-off and reads as sticky detach.
             host.ShowWithEntrance(
@@ -888,5 +890,4 @@ public sealed partial class PaperWindow
         return Math.Clamp(index, 0, count - 1);
     }
 }
-
 

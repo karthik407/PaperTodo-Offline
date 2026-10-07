@@ -43,7 +43,7 @@ internal sealed class DesktopBackgroundCapture : IDisposable
     internal sealed record Snapshot(BackgroundCaptureLayout.Scene Layout, BitmapSource Bitmap, bool PreBlurred);
 
     private readonly IntPtr _hwnd;
-    private readonly uint _oldAffinity;
+    private readonly WindowExclusion _exclusion;
     private readonly Dispatcher _dispatcher;
     private readonly Action<Exception> _failed;
     private readonly Action? _frameReady;
@@ -64,11 +64,7 @@ internal sealed class DesktopBackgroundCapture : IDisposable
         Action<Exception> failed,
         Action? frameReady = null)
     {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
-            throw new PlatformNotSupportedException("Background exclusion requires Windows 10 2004 or later.");
-        if (!GetWindowDisplayAffinity(hwnd, out _oldAffinity) || !SetWindowDisplayAffinity(hwnd, 0x11))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot exclude the surface from its own background.");
-
+        _exclusion = new WindowExclusion(hwnd);
         _hwnd = hwnd;
         _dispatcher = dispatcher;
         _failed = failed;
@@ -157,8 +153,7 @@ internal sealed class DesktopBackgroundCapture : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cancel.Cancel();
         lock (_gate) _latest = null;
-        if (GetWindowDisplayAffinity(_hwnd, out var current) && current == 0x11)
-            SetWindowDisplayAffinity(_hwnd, _oldAffinity);
+        _exclusion.Dispose();
         _ = _captureTask.ContinueWith(
             _ => _cancel.Dispose(),
             CancellationToken.None,
@@ -190,26 +185,31 @@ internal sealed class DesktopBackgroundCapture : IDisposable
 
     // One drag snapshot covers the entire virtual desktop at half width/height. The blur is baked
     // into this immutable texture once; movement only changes the screen-space crop.
-    internal static Task<Snapshot?> PrepareDragAsync(IntPtr excludeHwnd, CancellationToken token) =>
-        Task.Run(() =>
+    internal static async Task<Snapshot?> PrepareDragAsync(IntPtr excludeHwnd, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        WindowExclusion? exclusion = null;
+        if (excludeHwnd != IntPtr.Zero)
+        {
+            try { exclusion = new WindowExclusion(excludeHwnd); }
+            catch (Exception ex) when (ex is Win32Exception or PlatformNotSupportedException)
+            {
+                return null;
+            }
+        }
+
+        // Acquire on the caller's lifecycle boundary, before the worker can be delayed. Cancel
+        // must restore this HWND synchronously before its owner starts a final local capture or
+        // returns a pooled drag window. A late worker only releases this same idempotent owner.
+        using (exclusion)
+        using (token.Register(() => exclusion?.Dispose()))
+        return await Task.Run(() =>
         {
             var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
-            uint previousAffinity = 0;
-            var affinityChanged = false;
             try
             {
                 token.ThrowIfCancellationRequested();
-                if (excludeHwnd != IntPtr.Zero)
-                {
-                    if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041) ||
-                        !GetWindowDisplayAffinity(excludeHwnd, out previousAffinity) ||
-                        !SetWindowDisplayAffinity(excludeHwnd, 0x11))
-                    {
-                        return null;
-                    }
-                    affinityChanged = true;
-                    DwmFlush();
-                }
+                if (exclusion != null) DwmFlush();
 
                 var desktop = DesktopBounds;
                 if (desktop.Width <= 0 || desktop.Height <= 0) return null;
@@ -230,15 +230,42 @@ internal sealed class DesktopBackgroundCapture : IDisposable
             }
             finally
             {
-                if (affinityChanged &&
-                    GetWindowDisplayAffinity(excludeHwnd, out var current) &&
-                    current == 0x11)
-                {
-                    SetWindowDisplayAffinity(excludeHwnd, previousAffinity);
-                }
                 if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi);
             }
-        }, token);
+        }, token).ConfigureAwait(false);
+    }
+
+    // Local and drag capture share only native exclusion cleanup. Their surface owner serializes
+    // acquisition; this is not a second capture registry or a reference-counted HWND lifetime.
+    private sealed class WindowExclusion : IDisposable
+    {
+        private readonly IntPtr _hwnd;
+        private readonly uint _previous;
+        private readonly object _gate = new();
+        private bool _disposed;
+
+        internal WindowExclusion(IntPtr hwnd)
+        {
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
+                throw new PlatformNotSupportedException("Background exclusion requires Windows 10 2004 or later.");
+            if (!GetWindowDisplayAffinity(hwnd, out _previous) || !SetWindowDisplayAffinity(hwnd, 0x11))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot exclude the surface from its own background.");
+            _hwnd = hwnd;
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                // Keep the native restore inside the lock: cancellation cannot return while an
+                // earlier worker release still has permission to change a newly reused HWND.
+                if (GetWindowDisplayAffinity(_hwnd, out var current) && current == 0x11)
+                    SetWindowDisplayAffinity(_hwnd, _previous);
+            }
+        }
+    }
 
     private static void ApplyLightGaussianBlur(
         byte[] pixels,
