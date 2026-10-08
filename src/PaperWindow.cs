@@ -3294,15 +3294,21 @@ public sealed partial class PaperWindow : Window
 
     private ContextMenu CreateContextMenu()
     {
-        var menu = new MaterialContextMenu
-        {
-            Padding = new Thickness(4, 4, 4, 4),
-            FontFamily = AppTypography.UiFontFamily,
-            Language = AppTypography.Language,
-            FontSize = AppTypography.Scale(13),
-            HasDropShadow = true,
-            Template = SharedContextMenuTemplate
-        };
+        var menu = new MaterialContextMenu();
+        InitializeContextMenu(menu);
+        return menu;
+    }
+
+    // Called once for each owned menu, either at creation or when a Todo placeholder
+    // is first requested. Preserve that instance so WPF's TextBox Closed hook survives.
+    private void InitializeContextMenu(ContextMenu menu)
+    {
+        menu.Padding = new Thickness(4, 4, 4, 4);
+        menu.FontFamily = AppTypography.UiFontFamily;
+        menu.Language = AppTypography.Language;
+        menu.FontSize = AppTypography.Scale(13);
+        menu.HasDropShadow = true;
+        menu.Template = SharedContextMenuTemplate;
         AppTypography.ApplyTextRendering(menu);
         UpdateContextMenuTheme(menu);
         menu.Opened += (_, _) =>
@@ -3325,7 +3331,6 @@ public sealed partial class PaperWindow : Window
 
         menu.Resources.Add(typeof(MenuItem), SharedCompactMenuItemStyle);
         RegisterThemedContextMenu(menu);
-        return menu;
     }
 
     private bool IsPaperContextMenuInteractionActive =>
