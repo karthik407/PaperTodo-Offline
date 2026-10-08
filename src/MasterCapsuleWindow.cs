@@ -517,6 +517,8 @@ public sealed class MasterCapsuleWindow : Window
 
         var capture = new CancellationTokenSource();
         _floatingDragBackgroundCapture = capture;
+        host.BeginDragBackground();
+        var retained = false;
         try
         {
             var snapshot = await DesktopBackgroundCapture.PrepareDragAsync(
@@ -524,9 +526,13 @@ public sealed class MasterCapsuleWindow : Window
                 capture.Token);
             if (snapshot != null &&
                 ReferenceEquals(capture, _floatingDragBackgroundCapture) &&
-                ReferenceEquals(host, _floatingDragHost))
+                ReferenceEquals(host, _floatingDragHost) &&
+                _controller.State.MatchAuxiliaryMaterialStrength &&
+                PaperSkins.UsesSampledAuxiliary(Theme.Skin) &&
+                !SystemParameters.HighContrast && DwmMicaApi.Instance.EffectsEnabled)
             {
                 host.UseDragBackground(snapshot);
+                retained = true;
             }
         }
         catch (OperationCanceledException)
@@ -535,13 +541,13 @@ public sealed class MasterCapsuleWindow : Window
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or
             InvalidOperationException or ExternalException or ArgumentException or NotSupportedException)
         {
-            if (ReferenceEquals(capture, _floatingDragBackgroundCapture))
-            {
-                _floatingDragBackgroundCapture = null;
-                capture.Dispose();
-            }
             System.Diagnostics.Debug.WriteLine(
                 "Master drag background unavailable; keeping the live material: " + ex.Message);
+        }
+        finally
+        {
+            if (!retained && ReferenceEquals(capture, _floatingDragBackgroundCapture))
+                EndFloatingDragBackground();
         }
     }
 
@@ -1338,6 +1344,5 @@ public sealed class MasterCapsuleWindow : Window
         return IntPtr.Zero;
     }
 }
-
 
 

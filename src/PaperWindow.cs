@@ -816,15 +816,25 @@ public sealed partial class PaperWindow : Window
 
     public void CloseForReal()
     {
-        if (IsClosed)
+        if (IsClosed || _isClosingForReal)
         {
             return;
         }
 
-        BeginPaperWindowClose();
-        CloseExpandedDeepCapsuleSlotHostForReal();
-
-        Close();
+        // Keep accepting endpoint frames during handoff, but let only this invocation close
+        // the window when a queued command or plugin callback reenters before Closing is set.
+        _isClosingForReal = true;
+        try
+        {
+            BeginPaperWindowClose();
+            if (IsClosed) return;
+            CloseExpandedDeepCapsuleSlotHostForReal();
+            Close();
+        }
+        finally
+        {
+            _isClosingForReal = false;
+        }
     }
 
     public void UpdateWindowSwitcherVisibility()
