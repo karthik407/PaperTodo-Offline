@@ -88,10 +88,10 @@ public sealed partial class PaperWindow
     internal void ActivateFromEdgeShortcut()
     {
         CloseDeepCapsuleSlotContextMenu();
-        if (TryRunScriptCapsule())
+        /* if (TryRunScriptCapsule())
         {
             return;
-        }
+        } */
 
         if (_paper.IsCollapsed)
         {
@@ -154,10 +154,10 @@ public sealed partial class PaperWindow
     private void ActivateFromDeepCapsuleSlot()
     {
         CloseDeepCapsuleSlotContextMenu();
-        if (TryRunScriptCapsule())
+        /* if (TryRunScriptCapsule())
         {
             return;
-        }
+        } */
 
         if (_paper.IsCollapsed)
         {

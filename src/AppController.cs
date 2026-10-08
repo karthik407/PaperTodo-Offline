@@ -230,10 +230,10 @@ public sealed partial class AppController : IDisposable
     {
         CreateTrayIcon();
         InitializeGlobalHotkeys();
-        _ = Task.Run(PaperWindow.CleanupOldScriptCapsuleTempFiles);
+        /*_ = Task.Run(PaperWindow.CleanupOldScriptCapsuleTempFiles);
         _ = Application.Current.Dispatcher.BeginInvoke(
             () => { if (!IsExiting) PaperWindow.EnsurePersistentScriptProcessForSettings(State); },
-            DispatcherPriority.SystemIdle);
+            DispatcherPriority.SystemIdle);*/
         RefreshFullscreenAvoidanceRuntime();
         RefreshTodoReminderSchedule();
         RefreshExperimentalWindowRuntime();
@@ -812,20 +812,20 @@ public sealed partial class AppController : IDisposable
             paper.IsVisible &&
             window.HasExpandedPaperSurface;
     }
-
+    /*
     public bool ShouldRunLinkedScriptCapsule(string? noteId)
     {
         return State.EnableTodoPaperLinks &&
             State.RunLinkedScriptCapsulesOnClick &&
             IsLinkedScriptCapsule(noteId);
     }
-
+    
     private bool IsLinkedScriptCapsule(string? noteId)
     {
         var note = FindNote(noteId);
         return note != null && IsCurrentScriptCapsule(note);
     }
-
+    
     public bool RunLinkedScriptCapsule(string? noteId)
     {
         var note = FindNote(noteId);
@@ -837,7 +837,7 @@ public sealed partial class AppController : IDisposable
         var window = GetOrCreatePaperWindow(note);
         return window.TryRunScriptCapsule();
     }
-
+    
     private bool IsCurrentScriptCapsule(PaperData note)
     {
         if (!string.Equals(
@@ -851,7 +851,7 @@ public sealed partial class AppController : IDisposable
             ? window.IsCurrentScriptCapsule()
             : PaperWindow.IsScriptCapsuleContent(note.Content);
     }
-
+    */
     public void NotifyPaperDisplayTitleChanged(string? paperId)
     {
         if (string.IsNullOrWhiteSpace(paperId))
@@ -4197,7 +4197,7 @@ public sealed partial class AppController : IDisposable
         MarkdownEdgePreviewPreload.For(Application.Current.Dispatcher).Clear();
         // Stop all child processes together; their grace periods overlap each other and WPF
         // teardown. Only non-UI process work runs in the pool, not Window/Host disposal.
-        var scriptShutdown = PaperWindow.StopAllScriptProcessesAsync();
+        //var scriptShutdown = PaperWindow.StopAllScriptProcessesAsync();
         _paperSurfaceRestoreGeneration++;
         _startupShellPrewarmGeneration++;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
@@ -4236,7 +4236,7 @@ public sealed partial class AppController : IDisposable
         }
         _masterCapsules.Clear();
         TryExitCleanup(_imageStore.Dispose);
-        TryExitCleanup(() => scriptShutdown.GetAwaiter().GetResult());
+        //TryExitCleanup(() => scriptShutdown.GetAwaiter().GetResult());
     }
 }
 

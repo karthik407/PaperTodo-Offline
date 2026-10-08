@@ -209,11 +209,11 @@ public sealed partial class AppController
             value => State.HideLinkedPapersFromCapsules = value,
             SettingEffects.LinkedCapsules,
             title: Strings.Get("SettingsHideLinkedPapersFromCapsules"));
-        yield return DefineSetting<bool>("scripts.run_linked_on_click",
+        /* yield return DefineSetting<bool>("scripts.run_linked_on_click",
             () => State.RunLinkedScriptCapsulesOnClick,
             value => State.RunLinkedScriptCapsulesOnClick = value,
             SettingEffects.TodoRows,
-            title: Strings.Get("SettingsRunLinkedScriptCapsulesOnClick"));
+            title: Strings.Get("SettingsRunLinkedScriptCapsulesOnClick")); */
         yield return DefineSetting<bool>("topbar.new_todo",
             () => State.ShowTopBarNewTodoButton,
             value => State.ShowTopBarNewTodoButton = value,
@@ -488,7 +488,7 @@ public sealed partial class AppController
             SettingEffects.TetherVisibility,
             title: Strings.Get("LabsTetherMinimizedBehavior"),
             options: ["hide", "capsule"]);
-        yield return DefineSetting<bool>("scripts.persistent_process",
+        /* yield return DefineSetting<bool>("scripts.persistent_process",
             () => State.UsePersistentPowerShellProcess,
             value => State.UsePersistentPowerShellProcess = value,
             SettingEffects.Scripts,
@@ -502,7 +502,7 @@ public sealed partial class AppController
             () => State.HideScriptRunWindow,
             value => State.HideScriptRunWindow = value,
             SettingEffects.None,
-            title: Strings.Get("SettingsHideScriptRunWindow"));
+            title: Strings.Get("SettingsHideScriptRunWindow")); */
         yield return DefineSetting<bool>("shortcuts.preserve_linked_hidden",
             () => State.PreserveLinkedPaperHiddenStateInVisibilityShortcuts,
             value => State.PreserveLinkedPaperHiddenStateInVisibilityShortcuts = value,

@@ -18,7 +18,7 @@ public sealed partial class AppController
         TodoLinks, TodoRows, LinkedCapsules, TopBar, SystemVisibility, Fullscreen, Resize,
         CapsuleMode, Arrange, CapsuleClose, Titles, Preview, HoverIntent, EdgeTopmost,
         Opacity, Focus, Passive, Reminders, Magnet, Tether, TetherOptions, TetherVisibility,
-        Scripts, VisibilitySnapshot, Shortcuts, Mcp
+        VisibilitySnapshot, Shortcuts, Mcp
     }
 
     private PaperSettingDefinition DefineSetting<T>(string id, Func<T> get, Action<T> set,
@@ -303,12 +303,6 @@ public sealed partial class AppController
                     if (State.ExperimentalTetherVisibilityLink) w.RefreshExperimentalTetherVisibilityOptions();
                     else w.DisableExperimentalTetherVisibilityLink();
                 }
-                break;
-            case SettingEffects.Scripts:
-                if (State.UsePersistentPowerShellProcess)
-                    PaperWindow.EnsurePersistentScriptProcessForSettings(State);
-                else
-                    PaperWindow.StopPersistentScriptProcesses();
                 break;
             case SettingEffects.VisibilitySnapshot: ClearVisibilityShortcutRestoreSnapshot(); break;
             case SettingEffects.Mcp: RefreshMcpRuntime(); break;

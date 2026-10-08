@@ -1263,20 +1263,17 @@ public sealed partial class AppController
 
     private string PaperTypeIcon(PaperData paper)
     {
-        if (paper.Type == PaperTypes.Note && IsCurrentScriptCapsule(paper))
+        /* if (paper.Type == PaperTypes.Note && IsCurrentScriptCapsule(paper))
         {
             return "⚡";
-        }
+        } */
 
         return paper.Type == PaperTypes.Note ? "✎" : "✓";
     }
 
     private double PaperTypeIconFontSize(PaperData paper)
     {
-        return AppTypography.Scale(
-            paper.Type == PaperTypes.Note && IsCurrentScriptCapsule(paper)
-                ? 15.0
-                : 14.0);
+        return AppTypography.Scale(14.0);
     }
 
     private static SolidColorBrush FrozenBrush(Color color)

@@ -547,8 +547,9 @@ public sealed partial class PaperWindow
         var hasLinkedPath = !string.IsNullOrWhiteSpace(item.LinkedPath);
         var hasLinkedPaper = _controller.State.EnableTodoPaperLinks &&
             _controller.TryGetLinkedPaperTitle(item.LinkedPaperId, out linkedPaperTitle);
-        var runLinkedScriptOnClick = hasLinkedPaper &&
-            _controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId);
+        /*var runLinkedScriptOnClick = hasLinkedPaper &&
+            _controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId);*/
+        var runLinkedScriptOnClick = false;
         var todoRemindersEnabled =
             _controller.State.ExperimentalTodoReminders;
         var showTodoReminderButton = todoRemindersEnabled &&
@@ -1119,14 +1120,14 @@ public sealed partial class PaperWindow
             linkButton.MouseLeftButtonUp += (_, e) =>
             {
                 linkButton.Opacity = 1.0;
-                if (!_controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId) ||
+                /*if (!_controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId) ||
                     !_controller.RunLinkedScriptCapsule(item.LinkedPaperId))
-                {
-                    _controller.OpenLinkedPaper(
-                        item.LinkedPaperId,
-                        this,
-                        toggleIfExcludedFromCapsules: true);
-                }
+                {*/
+                _controller.OpenLinkedPaper(
+                    item.LinkedPaperId,
+                    this,
+                    toggleIfExcludedFromCapsules: true);
+                //}
                 e.Handled = true;
             };
             AttachItemContextMenu(linkButton);
@@ -2671,9 +2672,9 @@ public sealed partial class PaperWindow
         }
     }
 
-private static bool TryGetTodoPastingText(
-        IDataObject dataObject,
-        out string raw)
+    private static bool TryGetTodoPastingText(
+            IDataObject dataObject,
+            out string raw)
     {
         raw = "";
         try
