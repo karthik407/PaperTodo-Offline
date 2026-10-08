@@ -201,8 +201,10 @@ internal sealed class DesktopBackgroundCapture : IDisposable
         // Acquire on the caller's lifecycle boundary, before the worker can be delayed. Cancel
         // must restore this HWND synchronously before its owner starts a final local capture or
         // returns a pooled drag window. A late worker only releases this same idempotent owner.
-        using (exclusion)
+        // Restore the HWND exclusion before unregistering cancellation: cancellation must not
+        // return while a completed worker still has a pending native restore.
         using (token.Register(() => exclusion?.Dispose()))
+        using (exclusion)
         return await Task.Run(() =>
         {
             var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
