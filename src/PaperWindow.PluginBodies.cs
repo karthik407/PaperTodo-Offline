@@ -89,11 +89,11 @@ public sealed partial class PaperWindow
         get => _markdownBodySession?.ApplyingExternalChange == true;
         set => RequireMarkdownBodySession().ApplyingExternalChange = value;
     }
-    private bool _liveIsScriptCapsule
+    /* private bool _liveIsScriptCapsule
     {
         get => _markdownBodySession?.LiveIsScriptCapsule == true;
         set => RequireMarkdownBodySession().LiveIsScriptCapsule = value;
-    }
+    } */
 
     private MarkdownPaperBodySession RequireMarkdownBodySession() =>
         _markdownBodySession ?? throw new InvalidOperationException(
@@ -519,25 +519,25 @@ public sealed partial class PaperWindow
                 StringComparer.Ordinal) == true;
         Action<string> setTitle = runtimeOwnsPresentation
             ? _ => { }
-            : title => InvokePluginContext(
-                generation,
-                providerId,
-                () => _controller.UpdatePaperTitleFromPlugin(
-                    _paper,
-                    title,
-                    providerId));
+        : title => InvokePluginContext(
+            generation,
+            providerId,
+            () => _controller.UpdatePaperTitleFromPlugin(
+                _paper,
+                title,
+                providerId));
         Action<string> setHeaderText = runtimeOwnsPresentation
             ? _ => { }
-            : text => InvokePluginContext(
-                generation,
-                providerId,
-                () => SetPluginHeaderText(text));
+        : text => InvokePluginContext(
+            generation,
+            providerId,
+            () => SetPluginHeaderText(text));
         Action<PaperCapsulePresentation?> setCapsulePresentation = runtimeOwnsPresentation
             ? _ => { }
-            : presentation => InvokePluginContext(
-                generation,
-                providerId,
-                () => SetPluginCapsulePresentation(presentation));
+        : presentation => InvokePluginContext(
+            generation,
+            providerId,
+            () => SetPluginCapsulePresentation(presentation));
         Action<PaperBodyInputClaims> setInputClaims = claims => InvokePluginContext(
             generation,
             providerId,
@@ -1302,13 +1302,13 @@ public sealed partial class PaperWindow
         _noteContentDirty = false;
         InvalidateEdgeCapsulePreviewContent();
 
-        var wasScriptCapsule = _liveIsScriptCapsule;
+        /* var wasScriptCapsule = _liveIsScriptCapsule;
         _liveIsScriptCapsule = IsScriptCapsuleDocument(_noteBox);
         if (wasScriptCapsule != _liveIsScriptCapsule)
         {
             RefreshCapsuleLabel();
             RefreshPaperContextMenus();
-        }
+        } */
     }
 
     internal FrameworkElement CreateMarkdownBodyView() =>

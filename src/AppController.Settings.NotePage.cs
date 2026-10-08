@@ -33,7 +33,7 @@ public sealed partial class AppController
                         ToggleAutoCompressLargeImages),
                     "TipAutoCompressLargeImages"))));
 
-            content.Children.Add(BuildSettingsLiveRegion("note.scripts", () => AdvancedSettingsBlock(
+            /* content.Children.Add(BuildSettingsLiveRegion("note.scripts", () => AdvancedSettingsBlock(
                 SettingsSectionLabel(Strings.Get("SettingsScriptCapsule")),
                 WrapWithHint(
                     SettingsToggle(
@@ -52,7 +52,7 @@ public sealed partial class AppController
                         Strings.Get("SettingsHideScriptRunWindow"),
                         State.HideScriptRunWindow,
                         ToggleHideScriptRunWindow),
-                    "TipHideScriptRunWindow"))));
+                    "TipHideScriptRunWindow")))); */
         }
 
         return WithSettingsPageRestoreFooter(
@@ -125,12 +125,12 @@ public sealed partial class AppController
         State.MarkdownEditAnimationEnabled = true;
         State.ExternalMarkdownExtension = ExternalMarkdownFileExtensions.Default;
         State.AutoCompressLargeImages = true;
-        State.UsePersistentPowerShellProcess = false;
-        State.PreferPowerShell7 = true;
-        State.HideScriptRunWindow = true;
+        //State.UsePersistentPowerShellProcess = false;
+        //State.PreferPowerShell7 = true;
+        //State.HideScriptRunWindow = true;
         _imageStore.AutoCompressLargeImages = true;
 
-        PaperWindow.StopPersistentScriptProcesses();
+        //PaperWindow.StopPersistentScriptProcesses();
         foreach (var window in _windows.Values)
         {
             window.UpdateMarkdownRenderMode();

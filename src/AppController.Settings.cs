@@ -199,7 +199,7 @@ public sealed partial class AppController
         SetSettingFromUi("focus.inactive_opacity_enabled", !State.ExperimentalInactivePaperOpacity);
 
     private void SetExperimentalInactivePaperOpacityLevel(double opacity) =>
-        SetSettingFromUi("focus.inactive_opacity", ExperimentalOpacityLevels.Normalize( opacity, ExperimentalOpacityLevels.DefaultInactivePaper));
+        SetSettingFromUi("focus.inactive_opacity", ExperimentalOpacityLevels.Normalize(opacity, ExperimentalOpacityLevels.DefaultInactivePaper));
 
     private void ToggleExperimentalRestingCapsuleOpacity() =>
         SetSettingFromUi("focus.capsule_opacity_enabled", !State.ExperimentalRestingCapsuleOpacity);
@@ -211,7 +211,7 @@ public sealed partial class AppController
         SetSettingFromUi("focus.capsule_opacity_always", !State.ExperimentalRestingCapsuleOpacityAlways);
 
     private void SetExperimentalRestingCapsuleOpacityLevel(double opacity) =>
-        SetSettingFromUi("focus.capsule_opacity", ExperimentalOpacityLevels.Normalize( opacity, ExperimentalOpacityLevels.DefaultRestingCapsule));
+        SetSettingFromUi("focus.capsule_opacity", ExperimentalOpacityLevels.Normalize(opacity, ExperimentalOpacityLevels.DefaultRestingCapsule));
 
     private void RefreshExperimentalOpacitySurfaces(bool animate = true)
     {
@@ -2592,14 +2592,14 @@ public sealed partial class AppController
         }
     }
 
-    private void TogglePersistentPowerShellProcess() =>
+    /* private void TogglePersistentPowerShellProcess() =>
         SetSettingFromUi("scripts.persistent_process", !State.UsePersistentPowerShellProcess);
 
     private void TogglePreferPowerShell7() =>
         SetSettingFromUi("scripts.prefer_powershell7", !State.PreferPowerShell7);
 
     private void ToggleHideScriptRunWindow() =>
-        SetSettingFromUi("scripts.hide_run_window", !State.HideScriptRunWindow);
+        SetSettingFromUi("scripts.hide_run_window", !State.HideScriptRunWindow); */
 
     private void ToggleToolTips() =>
         SetSettingFromUi("general.tooltips", !State.EnableToolTips);
@@ -2625,8 +2625,8 @@ public sealed partial class AppController
     private void ToggleHideLinkedPapersFromCapsules() =>
         SetSettingFromUi("todo.hide_linked_paper_capsules", !State.HideLinkedPapersFromCapsules);
 
-    private void ToggleRunLinkedScriptCapsulesOnClick() =>
-        SetSettingFromUi("scripts.run_linked_on_click", !State.RunLinkedScriptCapsulesOnClick);
+    /*     private void ToggleRunLinkedScriptCapsulesOnClick() =>
+            SetSettingFromUi("scripts.run_linked_on_click", !State.RunLinkedScriptCapsulesOnClick); */
 
     private void ToggleTodoPaperLinks() =>
         SetSettingFromUi("todo.paper_links", !State.EnableTodoPaperLinks);

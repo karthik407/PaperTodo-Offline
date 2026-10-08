@@ -108,7 +108,7 @@ public sealed partial class AppController
             hideLinkedPapersFromCapsulesToggle,
             "TipHideLinkedPapersFromCapsules"));
 
-        var runLinkedScriptCapsulesToggle = SettingsToggle(
+        /* var runLinkedScriptCapsulesToggle = SettingsToggle(
             Strings.Get("SettingsRunLinkedScriptCapsulesOnClick"),
             State.RunLinkedScriptCapsulesOnClick,
             ToggleRunLinkedScriptCapsulesOnClick);
@@ -117,7 +117,7 @@ public sealed partial class AppController
             runLinkedScriptCapsulesToggle.IsEnabled ? 1.0 : 0.55;
         content.Children.Add(WrapWithHint(
             runLinkedScriptCapsulesToggle,
-            "TipRunLinkedScriptCapsulesOnClick"));
+            "TipRunLinkedScriptCapsulesOnClick")); */
         return content;
     }
 
@@ -131,7 +131,7 @@ public sealed partial class AppController
         State.AllowLongLinkedPaperTitles = false;
         State.ShowLinkedPathExtensionOnly = false;
         State.HideLinkedPapersFromCapsules = false;
-        State.RunLinkedScriptCapsulesOnClick = false;
+        //State.RunLinkedScriptCapsulesOnClick = false;
         State.ExperimentalTodoReminders = false;
         State.ExperimentalTodoReminderShowButton = true;
         State.ExperimentalTodoReminderQuickMinutes =

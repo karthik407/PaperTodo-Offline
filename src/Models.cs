@@ -510,7 +510,6 @@ public sealed class AppState
     public bool ShowLinkedPathExtensionOnly { get; set; }
     [JsonPropertyName("hideLinkedNotesFromCapsules")]
     public bool HideLinkedPapersFromCapsules { get; set; }
-    public bool RunLinkedScriptCapsulesOnClick { get; set; }
     public int MaxTitleLength { get; set; } = PaperTitles.DefaultMaxTitleLength;
     public bool UseCapsuleCollapseAll { get; set; } = true;
     public bool CompactMasterCapsule { get; set; }
@@ -569,9 +568,6 @@ public sealed class AppState
     /// </summary>
     public string ResizeGripMode { get; set; } = ResizeGripModes.Soft;
     public string FullscreenTopmostMode { get; set; } = FullscreenTopmostModes.Avoid;
-    public bool UsePersistentPowerShellProcess { get; set; }
-    public bool PreferPowerShell7 { get; set; } = true;
-    public bool HideScriptRunWindow { get; set; } = true;
     // Wire values: 0 = unlimited (legacy/default), -1 = show zero title characters.
     public int DeepCapsuleTitleMeasureCharacterLimit { get; set; }
     public Dictionary<string, string> GlobalHotkeys { get; set; } = new();
