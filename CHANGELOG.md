@@ -55,6 +55,8 @@ This log is written for general and power users alike. It focuses on user-facing
 #### Bug fixes and improvements
 
 - Improved Show/Hide All responsiveness by refreshing linked-paper buttons in place while preserving all Todo editors, text selections and native text undo history.
+- Reduced waiting when loading Todo papers or pasting many items by preparing row menus only when opened; mouse, menu-key and `Shift+F10` access work on the first request.
+- Reduced stuttering during Todo reordering, undo and redo by updating only changed rows and moving only the rows that need repositioning. Undoing or redoing a reorder preserves existing editors, keyboard focus and text selections.
 - MCP tool calls now identify invalid argument paths and missing required fields instead of returning only a generic invocation failure. Paper query results expose a `paper_id` alias alongside `id`, create-paper schemas describe the current configurable title limit without requiring a settings lookup for normal short titles, and `update_todo` can reorder an item by zero-based `order`.
 
 - Fixed Windows startup remaining shown as enabled after PaperTodo was disabled in Startup Apps or Task Manager. While Settings is open, PaperTodo periodically refreshes the effective Windows startup state; explicitly enabling it again clears PaperTodo's disabled approval record, rewrites the Run entry, and verifies the result.
