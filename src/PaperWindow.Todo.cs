@@ -1049,7 +1049,23 @@ public sealed partial class PaperWindow
                     return;
                 }
 
+                // Visibility is button presentation, not a reason to replace its Todo editor.
+                linkedPaperActive = _controller.IsLinkedPaperShown(item.LinkedPaperId);
+                var hovered = linkButton.IsMouseOver;
+                linkButton.Background = linkedPaperActive
+                    ? hovered ? LinkedPaperMediumBgBrush : LinkedPaperLightBgBrush
+                    : hovered ? LinkedPaperLightBgBrush : LinkedPaperNormalBgBrush;
+                linkGlyph.Foreground = linkedPaperActive
+                    ? LinkedPaperActiveTextBrush : hovered ? TextBrush : WeakTextBrush;
+                linkGlyph.Opacity = linkedPaperActive || hovered ? 1.0 : 0.72;
+
+                var runScript = _controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId);
+                if (linkedPaperTitle == refreshedTitle && runLinkedScriptOnClick == runScript)
+                {
+                    return;
+                }
                 linkedPaperTitle = refreshedTitle;
+                runLinkedScriptOnClick = runScript;
                 linkedPaperButtonText = showLinkedPaperName
                     ? LinkedPaperButtonLabel(isTodoMultiline: false)
                     : runLinkedScriptOnClick ? "⚡" : "\uE71B";
@@ -1065,6 +1081,14 @@ public sealed partial class PaperWindow
                 linkButton.ToolTip = runLinkedScriptOnClick
                     ? Strings.Format("ToolTipRunLinkedScriptCapsule", linkedPaperTitle)
                     : Strings.Format("ToolTipOpenLinkedPaper", linkedPaperTitle);
+                if (!showLinkedPaperName)
+                {
+                    linkGlyph.Text = linkedPaperButtonText;
+                    linkGlyph.FontFamily = new FontFamily(runLinkedScriptOnClick
+                        ? "Segoe UI Symbol" : "Segoe MDL2 Assets");
+                    linkGlyph.FontSize = runLinkedScriptOnClick
+                        ? metrics.LinkedPaperIconFontSize + 1 : metrics.LinkedPaperIconFontSize;
+                }
                 lastLinkedPaperNameMultiline = null;
                 UpdateLinkedPaperNameLayout();
             }
