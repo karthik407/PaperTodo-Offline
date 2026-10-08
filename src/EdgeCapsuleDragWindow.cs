@@ -216,6 +216,11 @@ internal sealed partial class EdgeCapsuleDragWindow : Window
         }
     }
 
+    internal void BeginDragBackground()
+    {
+        if (_paperBackground is SkinBorder skin) skin.BeginDragBackground();
+    }
+
     internal void UseDragBackground(DesktopBackgroundCapture.Snapshot snapshot)
     {
         if (_paperBackground is SkinBorder skin) skin.UseDragBackground(snapshot);
@@ -403,7 +408,8 @@ internal sealed partial class EdgeCapsuleDragWindow : Window
         {
             From = scaleFrom,
             To = 1,
-            Duration = TimeSpan.FromMilliseconds(durationMilliseconds),
+            Duration = TimeSpan.FromMilliseconds(
+                AnimationTiming.ScaleMilliseconds(durationMilliseconds)),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
         _entranceScale.BeginAnimation(ScaleTransform.ScaleXProperty, animation, HandoffBehavior.SnapshotAndReplace);

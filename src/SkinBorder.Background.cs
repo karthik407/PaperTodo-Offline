@@ -11,6 +11,7 @@ internal sealed partial class SkinBorder
     private MaterialSurfaceHost? _materialHost;
     private bool _menuRendered;
     private bool _sampledBackgroundCaptureSuspended;
+    private bool _dragBackgroundCaptureSuspended;
     internal BackgroundSession? BackgroundSessionState => _background;
     internal bool SuppressStaticBackgroundForOpening { get; private set; }
     internal bool FirstMenuRenderUsedBackground { get; private set; }
@@ -59,8 +60,8 @@ internal sealed partial class SkinBorder
         }
 
         _sampledBackgroundCaptureSuspended = suspended;
-        // Keep the already-rendered material scene as the live DComp source, but stop acquisition
-        // immediately so WDA_EXCLUDEFROMCAPTURE cannot overlap the queue cloak/cover handoff.
+        // Keep the already-rendered scene through a paper form animation or DComp handoff,
+        // but stop acquisition immediately so intermediate frames never start new captures.
         // Resuming marks that retained scene stale and replaces it with one endpoint snapshot.
         RefreshBackground();
     }
@@ -82,7 +83,7 @@ internal sealed partial class SkinBorder
         }
         if (sampled && IsLoaded) _background ??= new BackgroundSession(this);
         _background?.SetCaptureSuspended(
-            sampled && _sampledBackgroundCaptureSuspended);
+            sampled && (_sampledBackgroundCaptureSuspended || _dragBackgroundCaptureSuspended));
         _background?.RefreshBackground();
         UpdateAeroReflection();
     }
@@ -113,10 +114,24 @@ internal sealed partial class SkinBorder
         InvalidateVisual(); // e.g. Aero becomes opaque when an ancestor starts fading.
     }
 
+    internal void BeginDragBackground()
+    {
+        // The pending desktop snapshot already owns this surface's capture lifecycle. Stop local
+        // acquisition before it touches the same HWND, while retaining the last painted scene.
+        _dragBackgroundCaptureSuspended = true;
+        RefreshBackground();
+    }
+
     internal void UseDragBackground(DesktopBackgroundCapture.Snapshot snapshot) =>
         (_background ??= new BackgroundSession(this)).UseDragSnapshot(snapshot);
 
-    internal void EndDragBackground() => _background?.EndDragSnapshot();
+    internal void EndDragBackground()
+    {
+        var wasSuspended = _dragBackgroundCaptureSuspended;
+        _dragBackgroundCaptureSuspended = false;
+        _background?.EndDragSnapshot();
+        if (wasSuspended) RefreshBackground();
+    }
 
     private void ReleaseMaterialResources()
     {

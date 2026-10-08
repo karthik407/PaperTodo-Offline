@@ -9,6 +9,7 @@ internal static partial class Program
 {
     private static void ProxyInputReadiness()
     {
+        ProxySuccessorTranslation();
         QueuePrewarmLifetime();
         TerminalHandoffFrames();
         ProxyCompletionFailureStopsRetrying();

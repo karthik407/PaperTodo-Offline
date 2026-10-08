@@ -775,12 +775,10 @@ public sealed partial class PaperWindow
         RefreshCapsuleEligibilityForLinkedPaperChanges(previousItems);
     }
 
-    private bool TryCreateTodoSelectionContextMenu(
+    private bool TryPopulateTodoSelectionContextMenu(
         PaperItem item,
-        Border row,
-        out ContextMenu menu)
+        ContextMenu menu)
     {
-        menu = null!;
         if (_selectedTodoItemIds.Count <= 1 ||
             !_selectedTodoItemIds.Contains(item.Id))
         {
@@ -788,7 +786,6 @@ public sealed partial class PaperWindow
         }
 
         var selected = SelectedTodoItems();
-        menu = CreateContextMenu();
         menu.Items.Add(MenuHeader(Strings.Format(
             "MenuSelectedTodoCount",
             selected.Count)));
@@ -805,8 +802,6 @@ public sealed partial class PaperWindow
         menu.Items.Add(MenuItem(
             Strings.Format("MenuDeleteSelectedTodos", selected.Count),
             (_, _) => DeleteSelectedTodoItems()));
-        menu.Opened += (_, _) => row.Background = TodoSelectionBrush;
-        menu.Closed += (_, _) => UpdateTodoRowBackground(row);
         return true;
     }
 
@@ -1335,6 +1330,26 @@ public sealed partial class PaperWindow
         }
     }
 
+
+    internal void RefreshLinkedPaperRowsForVisibility()
+    {
+        if (_paper.Type != PaperTypes.Todo ||
+            _todoPanel == null ||
+            !_controller.State.EnableTodoPaperLinks)
+        {
+            return;
+        }
+
+        // These existing callbacks only refresh the linked button's presentation. No row,
+        // editor, native text history, selection or append area needs rebuilding for visibility.
+        foreach (var refreshers in _linkedPaperTitleRefreshers.Values)
+        {
+            foreach (var refresh in refreshers.Values)
+            {
+                refresh();
+            }
+        }
+    }
 
     public void RefreshLinkedPaperRows(string? paperId)
     {

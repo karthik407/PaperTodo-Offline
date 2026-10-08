@@ -133,6 +133,10 @@ internal static class MaterialDragChecks
             Wait(80);
             Program.Assert(!surface.IsBackgroundActive && !surface.HasBackgroundCapture,
                 "opacity fallback releases the static snapshot");
+            rejectedFrames = surface.BackgroundFrameCount;
+            surface.UseDragBackground(drag!);
+            Program.Assert(!surface.IsBackgroundActive && surface.BackgroundFrameCount == rejectedFrames,
+                "late drag snapshot cannot replace the current partial-opacity fallback");
             surface.Opacity = 1;
             Until(() => surface.IsBackgroundActive && !surface.HasBackgroundCapture,
                 "opacity restore takes one fresh snapshot");
@@ -140,6 +144,11 @@ internal static class MaterialDragChecks
             Wait(80);
             Program.Assert(!surface.IsBackgroundActive && !surface.HasBackgroundCapture,
                 "hide releases the static snapshot");
+            rejectedFrames = surface.BackgroundFrameCount;
+            surface.UseDragBackground(drag!);
+            Program.Assert(!surface.IsBackgroundActive && !surface.HasBackgroundCapture &&
+                surface.BackgroundFrameCount == rejectedFrames,
+                "late drag snapshot cannot retain desktop pixels on a hidden surface");
             window.Show();
             Until(() => surface.IsBackgroundActive && !surface.HasBackgroundCapture,
                 "show takes one fresh snapshot");
@@ -188,7 +197,21 @@ internal static class MaterialDragChecks
             host.ShowWithEntrance(new DeviceScreenPoint(320, 240), false, 1, 0);
             var surface = (SkinBorder)typeof(EdgeCapsuleDragWindow)
                 .GetField("_paperBackground", Program.Private)!.GetValue(host)!;
+            var hwnd = new WindowInteropHelper(host).Handle;
+            // Finish a real local worker while its UI delivery is still queued. Starting a drag
+            // must revoke that old HWND exclusion before acquiring the desktop snapshot's one.
+            // This goes through the existing master entry point, including its production host.
+            surface.Opacity = 0;
+            surface.RefreshBackground();
+            surface.Opacity = 1;
+            surface.RefreshBackground();
+            var local = surface.BackgroundSessionState?.Capture;
+            Program.Assert(local != null && local.Completion.Wait(TimeSpan.FromSeconds(5)) &&
+                DesktopBackgroundCapture.ReadAffinity(hwnd) == 0x11,
+                "master drag begins with an actual local frame awaiting UI delivery and owning HWND exclusion");
             var ready = Prepare();
+            Program.Assert(local!.IsStopped && !surface.HasBackgroundCapture,
+                "master drag revokes the old local capture before asynchronous desktop preparation");
             Until(() => ready.IsCompleted, "master drag snapshot preparation");
             ready.GetAwaiter().GetResult();
             var bitmap = surface.BackgroundSessionState?.Bitmap as BitmapSource;
@@ -197,10 +220,12 @@ internal static class MaterialDragChecks
                 bitmap.PixelWidth == Math.Max(1, (desktop.Width + 1) / 2) &&
                 bitmap.PixelHeight == Math.Max(1, (desktop.Height + 1) / 2),
                 "master floating drag receives the ordinary half-resolution virtual-desktop snapshot");
+            Program.Assert(DesktopBackgroundCapture.ReadAffinity(hwnd) == 0 &&
+                surface.BackgroundFailure == null && !surface.HasBackgroundCapture,
+                "successful master preparation restores HWND affinity and publishes an effective background without local overlap");
 
             var frames = surface.BackgroundFrameCount;
             var projections = surface.BackgroundProjectionCount;
-            var hwnd = new WindowInteropHelper(host).Handle;
             GetWindowRect(hwnd, out var bounds);
             Program.Assert(SetWindowPos(hwnd, IntPtr.Zero,
                     desktop.X + desktop.Width - (bounds.Right - bounds.Left) - 40,
@@ -211,7 +236,22 @@ internal static class MaterialDragChecks
                 surface.BackgroundFrameCount == frames && !surface.HasBackgroundCapture,
                 "master movement only reprojects the same texture without another capture");
 
+            surface.Opacity = .6;
+            surface.RefreshBackground();
+            Program.Assert(!surface.IsBackgroundActive && !surface.HasBackgroundCapture &&
+                DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "an active drag acquisition pause still releases its scene for partial-opacity fallback");
+            surface.Opacity = 1;
+            surface.RefreshBackground();
+            Wait(80);
+            Program.Assert(!surface.HasBackgroundCapture,
+                "restoring opacity does not restart local acquisition inside the same drag lifetime");
             release.Invoke(master, null);
+            Until(() => surface.IsBackgroundActive && !surface.HasBackgroundCapture &&
+                surface.BackgroundFrameCount > frames,
+                "ending the real drag lifetime takes one valid final background after opacity restoration");
+            Program.Assert(DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "final material after opacity restoration leaves no native exclusion");
             host.ReturnToPool();
             Program.Assert(captureField.GetValue(master) == null &&
                 !surface.IsBackgroundActive && !surface.HasBackgroundCapture,
@@ -226,15 +266,43 @@ internal static class MaterialDragChecks
             // completed worker must not publish its queued continuation into the next lease.
             var pending = Prepare();
             var canceled = ((CancellationTokenSource)captureField.GetValue(master)!).Token;
+            host.Hide();
             release.Invoke(master, null);
+            Program.Assert(DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "cancelling an unfinished master snapshot restores native affinity before returning its HWND");
             host.ReturnToPool();
+            var retiredHost = host;
             host = EdgeCapsuleDragWindow.Rent(options);
+            Program.Assert(ReferenceEquals(retiredHost, host) &&
+                new WindowInteropHelper(host).Handle == hwnd &&
+                ReferenceEquals(surface, typeof(EdgeCapsuleDragWindow)
+                    .GetField("_paperBackground", Program.Private)!.GetValue(host)),
+                "cancelled and replacement drag captures use the same pooled HWND and material surface");
             hostField.SetValue(master, host);
+            surface.UseLightweightMaterial = true;
+            host.ShowWithEntrance(new DeviceScreenPoint(320, 240), false, 1, 0);
+            Exception? replacementFailure = null;
+            using (var replacement = new DesktopBackgroundCapture(hwnd,
+                new DesktopBackgroundCapture.Region(0, 0, 80, 40, 0), host.Dispatcher,
+                error => replacementFailure = error))
+            {
+                Until(() => pending.IsCompleted && replacement.Completion.IsCompleted,
+                    "cancelled master and newly acquired local capture finish independently");
+                pending.GetAwaiter().GetResult();
+                Program.Assert(DesktopBackgroundCapture.ReadAffinity(hwnd) == 0x11 &&
+                    replacementFailure == null && replacement.TakeLatest() is { Bitmap.IsFrozen: true },
+                    "late cancelled worker cannot revoke a new HWND owner's exclusion or invalidate its captured pixels");
+            }
+            Program.Assert(DesktopBackgroundCapture.ReadAffinity(hwnd) == 0,
+                "new capture restores the original affinity after the old drag worker has exited");
             Until(() => pending.IsCompleted, "cancelled master background completion");
             pending.GetAwaiter().GetResult();
             Program.Assert(canceled.IsCancellationRequested && !surface.IsBackgroundActive &&
                 captureField.GetValue(master) == null,
                 "late master capture cannot repopulate a returned and re-leased drag host");
+            surface.UseLightweightMaterial = false;
+            Until(() => surface.IsBackgroundActive && !surface.HasBackgroundCapture,
+                "a reused host can acquire a fresh material scene after cancellation");
 
             foreach (var skin in new[] { PaperSkins.Acrylic, PaperSkins.Aero, PaperSkins.Paper })
             {

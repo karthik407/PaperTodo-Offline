@@ -29,18 +29,14 @@ internal sealed partial class EdgeCapsuleQueueCompositionProxy
         }
 
         var now = Stopwatch.GetTimestamp();
-        return _members.Any(member =>
+        return _visuals.Any(state =>
         {
+            var member = state.Member;
             if (!member.Window.CanRouteEdgeCapsuleQueueProxyInput)
             {
                 return false;
             }
-            var frame =
-                EdgeCapsuleQueueProxyPolicy.SampleLogicalFrame(
-                    member.Plan,
-                    AnimationStartedAtTimestamp,
-                    _plan.DurationMilliseconds,
-                    now);
+            var frame = SamplePresentation(state, now);
             return frame.Visible &&
                 frame.IsHitTestVisible &&
                 !frame.InteractiveBounds.IsEmpty &&
@@ -79,19 +75,15 @@ internal sealed partial class EdgeCapsuleQueueCompositionProxy
         long timestamp,
         out EdgeCapsulePresentationFrame frame)
     {
-        var member = _members.FirstOrDefault(candidate =>
-            ReferenceEquals(candidate.Window, window));
-        if (_disposed || _coverLost || member == null)
+        var state = _visuals.FirstOrDefault(candidate =>
+            ReferenceEquals(candidate.Member.Window, window));
+        if (_disposed || _coverLost || state == null)
         {
             frame = EdgeCapsulePresentationFrame.Hidden;
             return false;
         }
 
-        frame = EdgeCapsuleQueueProxyPolicy.SampleLogicalFrame(
-            member.Plan,
-            AnimationStartedAtTimestamp,
-            _plan.DurationMilliseconds,
-            timestamp);
+        frame = SamplePresentation(state, timestamp);
         return true;
     }
 
@@ -235,19 +227,15 @@ internal sealed partial class EdgeCapsuleQueueCompositionProxy
         }
 
         var now = Stopwatch.GetTimestamp();
-        foreach (var member in _members)
+        foreach (var state in _visuals)
         {
+            var member = state.Member;
             if (!member.Window.CanRouteEdgeCapsuleQueueProxyInput)
             {
                 continue;
             }
 
-            var current =
-                EdgeCapsuleQueueProxyPolicy.SampleLogicalFrame(
-                    member.Plan,
-                    AnimationStartedAtTimestamp,
-                    _plan.DurationMilliseconds,
-                    now);
+            var current = SamplePresentation(state, now);
             if (!current.IsHitTestVisible ||
                 current.InteractiveBounds.IsEmpty ||
                 !EdgeCapsuleGeometry.Contains(
@@ -259,10 +247,8 @@ internal sealed partial class EdgeCapsuleQueueCompositionProxy
 
             var offset =
                 EdgeCapsuleQueueProxyPolicy.TranslationOffset(
-                    member.Plan,
-                    AnimationStartedAtTimestamp,
-                    _plan.DurationMilliseconds,
-                    now);
+                    current,
+                    member.Plan.Target.HostBounds);
             targetHandle = member.SourceHandle;
             endpointPoint = new DeviceScreenPoint(
                 point.X - offset.X,

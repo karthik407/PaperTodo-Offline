@@ -11,7 +11,7 @@ internal static class Program
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic;
     private const string FixtureMarker = ".papertodo-lifecycle-fixture";
-    private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "real-exit", "early-expand", "cancel-prewarm", "real-exit-scripts", "early-exit"];
+    private static readonly string[] Cases = ["startup", "missing-monitor", "master-queue-transfer", "master-queue-cancel", "master-queue-drag-preparation", "master-queue-drop-handoff", "master-queue-membership", "master-queue-mutations", "master-queue-hide", "master-queue-disconnect", "master-queue-merge", "master-queue-merge-collapsed", "master-queue-material-handoff", "controller-hide-create-reentry", "controller-hide-show-reentry", "controller-zorder-create-reentry", "controller-close-delete-reentry", "todo-visibility", "real-exit", "early-expand", "cancel-prewarm", "real-exit-scripts", "early-exit", "todo-context-menu", "todo-history"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -131,6 +131,18 @@ internal static class Program
 
     private static async Task RunFixture(string name)
     {
+        if (name == "todo-visibility")
+        {
+            await TodoVisibilityChecks.Run();
+            return;
+        }
+
+        if (name == "todo-history")
+        {
+            await TodoHistoryChecks.Run();
+            return;
+        }
+
         const int count = 5;
         var state = new AppState
         {
@@ -169,6 +181,10 @@ internal static class Program
             state.PaperSkin = PaperSkins.Acrylic;
             state.MatchAuxiliaryMaterialStrength = true;
         }
+        if (name.StartsWith("controller-"))
+            state.CapsuleCollapseAllActiveQueues["|" + DeepCapsuleSides.Right] = true;
+        if (name == "todo-context-menu")
+            TodoContextMenuChecks.Prepare(state);
         var store = new StateStore();
         store.SaveJsonSync(store.SerializeState(state), 1);
         var controller = new AppController();
@@ -180,6 +196,11 @@ internal static class Program
             await controller.StartAsync(createDefaultPaper: false);
             await Dispatcher.CurrentDispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
             var visible = windows.Values.Count(window => window.HasVisibleSurface);
+            if (name == "todo-context-menu")
+            {
+                await TodoContextMenuChecks.Run(controller, windows);
+                return;
+            }
             if (name == "missing-monitor")
             {
                 Require(!windows.ContainsKey("missing-screen"),
@@ -206,6 +227,26 @@ internal static class Program
             if (name == "master-queue-material-handoff")
             {
                 await MasterMaterialHandoffChecks.Run(controller, windows);
+                return;
+            }
+            if (name == "controller-hide-create-reentry")
+            {
+                await ControllerReentrancyChecks.HideDuringCreate(controller, windows);
+                return;
+            }
+            if (name == "controller-hide-show-reentry")
+            {
+                await ControllerReentrancyChecks.HideDuringShow(controller, windows);
+                return;
+            }
+            if (name == "controller-zorder-create-reentry")
+            {
+                await ControllerReentrancyChecks.ZOrderDuringCreate(controller, windows);
+                return;
+            }
+            if (name == "controller-close-delete-reentry")
+            {
+                await ControllerReentrancyChecks.CloseDuringDelete(controller, windows);
                 return;
             }
             if (name == "master-queue-drag-preparation")
@@ -515,4 +556,3 @@ internal static class Program
         if (!condition) throw new InvalidOperationException(message);
     }
 }
-

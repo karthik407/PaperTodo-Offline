@@ -183,7 +183,7 @@ Markdown 中的 Note 图片只通过 PaperTodo 内部 `i:` asset URI 引用宿�
 
 ### 4.4 插件状态
 
-插件 settings、Runtime state 与 per-paper state 由 `PaperBodyPluginDataStore` 独立保存在每个 provider 的普通 JSON 文件，不塞回 `data.json`。文件不存在才使用默认状态；已有文件读取失败则原样报告失败，不缓存空数据、不切换恢复文件。保存沿用写临时文件再替换的一次写入完整性。插件自己的备份、恢复或数据库由插件管理，宿主不为其维护第二数据路径。旧恢复文件不再自动选用，也不自动删除或迁移。插件页和快捷键注册使用已有的局部错误展示/失败状态，不让单个插件的数据错误终止其他插件配置。
+插件 settings、Runtime state 与 per-paper state 由 `PaperBodyPluginDataStore` 独立保存在每个 provider 的普通 JSON 文件，不塞回 `data.json`。文件不存在才使用默认状态；已有文件读取失败则原样报告失败，不缓存空数据、不切换恢复文件。保存沿用写临时文件再替换的一次写入完整性。后台保存只在数据锁内捕获各 provider 的版本与独立快照，序列化和写盘在锁外由单一写入通道串行完成；旧快照的完成或失败不清除后续修改，也不消耗后续修改的重试预算。删除纸片时立即移除内存中的插件附属状态，再进入相同的延迟保存流程。普通退出等待在途写入并保存最新状态；系统退出的禁止最终保存入口等待在途写入后阻止新写入。插件自己的备份、恢复或数据库由插件管理，宿主不为其维护第二数据路径。旧恢复文件不再自动选用，也不自动删除或迁移。插件页和快捷键注册使用已有的局部错误展示/失败状态，不让单个插件的数据错误终止其他插件配置。
 核心 `data.json` 保存只同步 PaperTodo 自己的内置 Markdown 编辑状态；第三方 `IPaperBodySession.Commit()` 仍是正文生命周期的 best-effort 回调，不作为核心保存或其他纸片外部写入的全局保存钩子。
 
 ## 5. Paper 与 paper-body 插件
@@ -191,6 +191,8 @@ Markdown 中的 Note 图片只通过 PaperTodo 内部 `i:` asset URI 引用宿�
 ### 5.1 Paper shell
 
 `PaperWindow` 是单纸片 UI owner，负责普通 paper shell、Todo/Note 交互、标题/工具栏、窗口行为和各子系统适配。
+
+窗口交接的同步 Render 等待和正文回调允许同一 Dispatcher 上的外部命令重入。`AppController` 的批量隐藏与浮层 z-order 更新只遍历本次入口的窗口集合；隐藏复用既有逐纸片 visibility version，后到的显示／删除命令使旧目标失效，旧淡出回调也不能再修改新显示的 opacity 或图像资源。关闭过程由 `PaperWindow.CloseForReal` 的调用范围防重入，但在 compositor 交接完成前仍保持 Alive、接受精确端点；交接或正文回调返回后复核生命周期，Closed 不得回退到 Closing。
 
 Edge Capsule 启用后，一张纸的可见 surface 不再等价于一个 `PaperWindow` HWND：docked capsule 由 `EdgeCapsuleHost` 提供，跨队列/脱墙拖拽可以临时使用 `EdgeCapsuleDragWindow`；这些 surface 仍引用同一 `PaperData`，不复制业务对象。
 
@@ -200,12 +202,12 @@ Edge Capsule 启用后，一张纸的可见 surface 不再等价于一个 `Paper
 
 三种装饰皮肤由 `SkinBorder` 绘制：描图纸固定纤维、Aero 和像素风。材质不管理布局、命中或窗口；Edge shape/layout 与 DComp translation-only 边界不变。`MaterialRelief` 仅为 Aero 缓存预算内的边缘高光，`SkinBorder.Aero` 只按宿主位置更新 Aero 的视差，不运行空闲动画。`MatchAuxiliaryMaterialStrength` 关闭时减弱辅助表面的背景柔化并增加更接近普通纸片的可读性底层；开启时使用完整强度。两档都不衰减正文、外轮廓或整窗 opacity。分层小窗口的云母／亚克力／描图纸使用局部场景 Gaussian diffusion 近似；不声称等同系统 Mica 壁纸算法，主窗口 DWM 不变。Aero 小窗口直接使用既有 alpha。失效、高对比度、系统禁用透明或部分透明时保留实色回退。已删除的皮肤 ID 由通用 Normalize 回退 paper，没有保留旧材质绘制。
 
-配色由 `Theme` 提供实色语义；原生皮肤只让成功启用原生背景的窗口外壳透明，不把透明画刷传入正文、菜单或插件颜色协议。启动时 `AppController.UsesNativeMicaWindows` 根据已保存的皮肤选择和系统支持决定普通纸片与设置窗口是否使用 non-layered HWND；同一会话不重建编辑器或修改 `AllowsTransparency`。`WindowChrome` 单独负责 non-client/glass 集成；`NativeMicaBackdrop` 在窗口所属 Dispatcher 上管理 DWM 材质与系统事件，`DwmMicaApi` 封装 DWM API，并将透色亚克力的旧版 accent 接法隔离在单一方法内。普通纸片的动画宽高、外边距和缩放能力统一由 `PaperWindow` 的形态动画管理，材质适配器不监听布局或反向改写窗口尺寸。原生窗口在形态动画入口暂时关闭系统缩放外框，完成或中断时恢复目标形态的尺寸与缩放能力；内层纸面和外层 HWND 使用同一进度，展开态零外边距与胶囊阴影外边距连续过渡。原生会话中的展开纸片填满 HWND，不保留 8 DIP 阴影外边距或 WPF 外壳阴影，不使用 `SetWindowRgn` 裁成内层纸片；系统圆角与外框交给 DWM，并使用纸片边框色；原生材质生效时隐藏 WPF 外壳描边，保留其布局厚度，避免两套圆角描边重叠。顶栏与设置外壳采用对应的内外圆角。原生 HWND 的 caption 恢复 COLOR_DEFAULT，不再给透明自绘顶栏下方盖一条实色 native caption；材质皮肤的 WPF 顶栏本身不再画独立底色、分隔描边或外边距，由唯一外壳材质连续绘制其下方；默认纸片仍沿用主线轻 tint，不改真实激活状态。纸片缩放命中仍由原有窗口消息逻辑处理。描图纸复用标准 Acrylic 原生背景。Aero 的内部 `aeroGlass` recipe 改为既有清透 alpha composition，不调用 state=3 或 state=4 模糊；蓝色透光与柔化斜反光由 WPF 绘制。它不读取桌面、不启动采样，也不改变截图可见性；原生 alpha 不可用时保留静态不透明表面。透色亚克力的 state=4 与其清理路径保持独立。见 D-051。标准云母与标准亚克力先关闭 legacy alpha，安装系统 backdrop。Windows 11 26100+ 成功启用 `DWMWA_REDIRECTIONBITMAP_ALPHA` 后采用零实际 glass margin，不再留下单独的 native caption 底板；能力调用失败时保留 full glass（-1），禁止仅清零而不提供 alpha 通道。透色亚克力试用零物理 glass margin 加 `SetWindowCompositionAttribute` 的可调色 accent policy，关闭原生 border 避免最顶端亮线，关闭系统 backdrop 且不再叠加 WPF 底色；两条接法只有全部设置成功后才让外壳透明。离开透色模式、动画回退和释放时清除 accent，再进入目标材质；`WindowChrome` 保留非零 glass 标志，避免其零值分支安装窗口 HRGN；透色 accent 与 aeroGlass 使用零实际 glass，系统 Mica/Acrylic 仅在显式 redirection alpha 成功后使用零实际 glass，否则保留 full glass；不增加第二套 NCCALCSIZE 或形状修改。原生材质、清透 alpha 与 accent 仍互斥。“材质始终显示激活效果”由适配器在原生材质生效时通过 `WM_NCACTIVATE` 保持活动外观，不改真实焦点、`WM_ACTIVATE` 或交互状态；关闭勾选或材质回退时恢复实际激活外观。失败/关闭效果恢复实色，但不恢复展开纸片的外层留白。普通纸片折叠、形态动画或部分透明时关闭原生背景并使用 WPF alpha 绘制，恢复 Mica 前先清除 legacy blur-behind alpha；显示动画提交不透明终点后移除整窗 opacity 时钟。Edge、drag、master、tether 胶囊仍是原有 layered HWND，不进入这个原生适配器；背景处理由表面按需持有的 `SkinBorder.BackgroundSession` 管理，也不改变 DComp translation-only ownership。原生云母不读取壁纸、截屏或维护背景纹理缓存；自动化测试的桌面截图仅用于验证正文未被遮盖或压暗（见 D-042）。
+配色由 `Theme` 提供实色语义；原生皮肤只让成功启用原生背景的窗口外壳透明，不把透明画刷传入正文、菜单或插件颜色协议。启动时 `AppController.UsesNativeMicaWindows` 根据已保存的皮肤选择和系统支持决定普通纸片与设置窗口是否使用 non-layered HWND；同一会话不重建编辑器或修改 `AllowsTransparency`。`WindowChrome` 单独负责 non-client/glass 集成；`NativeMicaBackdrop` 在窗口所属 Dispatcher 上管理 DWM 材质与系统事件，`DwmMicaApi` 封装 DWM API，并将透色亚克力的旧版 accent 接法隔离在单一方法内。普通纸片的动画宽高、外边距和缩放能力统一由 `PaperWindow` 的形态动画管理，材质适配器不监听布局或反向改写窗口尺寸。原生窗口在形态动画入口暂时关闭系统缩放外框并固定动画所需的最小尺寸，完成或中断时恢复目标形态的尺寸与缩放能力；每帧先更新内层纸面，再一次提交 HWND 的宽高，不通过两次 WPF 尺寸属性写入制造中间矩形。内层纸面和外层 HWND 使用同一进度，展开态零外边距与胶囊阴影外边距连续过渡。主纸片形态动画复用辅助采样暂停，当前场景保留到最终布局完成后再恢复采样；反转、隐藏与关闭沿现有形态生命周期收束。原生会话中的展开纸片填满 HWND，不保留 8 DIP 阴影外边距或 WPF 外壳阴影，不使用 `SetWindowRgn` 裁成内层纸片；系统圆角与外框交给 DWM，并使用纸片边框色；原生材质生效时隐藏 WPF 外壳描边，保留其布局厚度，避免两套圆角描边重叠。顶栏与设置外壳采用对应的内外圆角。原生 HWND 的 caption 恢复 COLOR_DEFAULT，不再给透明自绘顶栏下方盖一条实色 native caption；材质皮肤的 WPF 顶栏本身不再画独立底色、分隔描边或外边距，由唯一外壳材质连续绘制其下方；默认纸片仍沿用主线轻 tint，不改真实激活状态。纸片缩放命中仍由原有窗口消息逻辑处理。描图纸复用标准 Acrylic 原生背景。Aero 的内部 `aeroGlass` recipe 改为既有清透 alpha composition，不调用 state=3 或 state=4 模糊；蓝色透光与柔化斜反光由 WPF 绘制。它不读取桌面、不启动采样，也不改变截图可见性；原生 alpha 不可用时保留静态不透明表面。透色亚克力的 state=4 与其清理路径保持独立。见 D-051。标准云母与标准亚克力先关闭 legacy alpha，安装系统 backdrop。Windows 11 26100+ 成功启用 `DWMWA_REDIRECTIONBITMAP_ALPHA` 后采用零实际 glass margin，不再留下单独的 native caption 底板；能力调用失败时保留 full glass（-1），禁止仅清零而不提供 alpha 通道。透色亚克力试用零物理 glass margin 加 `SetWindowCompositionAttribute` 的可调色 accent policy，关闭原生 border 避免最顶端亮线，关闭系统 backdrop 且不再叠加 WPF 底色；两条接法只有全部设置成功后才让外壳透明。离开透色模式、动画回退和释放时清除 accent，再进入目标材质；`WindowChrome` 保留非零 glass 标志，避免其零值分支安装窗口 HRGN；透色 accent 与 aeroGlass 使用零实际 glass，系统 Mica/Acrylic 仅在显式 redirection alpha 成功后使用零实际 glass，否则保留 full glass；不增加第二套 NCCALCSIZE 或形状修改。原生材质、清透 alpha 与 accent 仍互斥。“材质始终显示激活效果”由适配器在原生材质生效时通过 `WM_NCACTIVATE` 保持活动外观，不改真实焦点、`WM_ACTIVATE` 或交互状态；关闭勾选或材质回退时恢复实际激活外观。失败/关闭效果恢复实色，但不恢复展开纸片的外层留白。普通纸片折叠、形态动画或部分透明时关闭原生背景并使用 WPF alpha 绘制，恢复 Mica 前先清除 legacy blur-behind alpha；显示动画提交不透明终点后移除整窗 opacity 时钟。Edge、drag、master、tether 胶囊仍是原有 layered HWND，不进入这个原生适配器；背景处理由表面按需持有的 `SkinBorder.BackgroundSession` 管理，也不改变 DComp translation-only ownership。原生云母不读取壁纸、截屏或维护背景纹理缓存；自动化测试的桌面截图仅用于验证正文未被遮盖或压暗（见 D-042）。
 
 
 `SkinBorder` 负责绘制和可选背景层的接入，画刷与几何缓存分开：配色只使画刷失效，尺寸只使几何失效，动画或采样开关不重建编辑器与顶栏图标。`Theme.MaterialColors` 缓存当前材质配色。`SkinBorder.BackgroundSession` 按需持有后台采样、最新帧、位图和呈现订阅；普通纸片、展开原生材质和设置窗口不创建采样会话，也不注册软件采样宿主观察。`MaterialSurfaceHost` 仅为需要采样的辅助表面或 Aero 透光／视差观察真实 `HwndSource`、宿主位置、DPI、可见性与祖先透明度，不使用菜单 owner 代替 popup，不接管输入或形态几何。窗口销毁／源释放／卸载解除订阅并停止对应资源。`DwmMicaApi` 的透明效果和 composition 状态由系统事件使缓存失效，不在移动热路径反复读注册表；仅切换“保持激活外观”不重新安装原生背景。
 
-`DesktopBackgroundCapture` 在本机内存中用 SRCCOPY 采样局部 SDR 背景，保留逐窗口像素预算、独立低频采样、屏幕锚定采样网格与单最新帧所有权；停止与迟到发布互斥，已转交呈现端的缓冲只由接收者释放。菜单的移动余量小于可拖动胶囊，但内侧保护区仍覆盖最强模糊核；不会降低正文或整个应用的帧率。范围减少不等于所有 DPI 下上传像素都减少：较小范围可能退出降采样档，采样预算和质量分别检查。UI 继续使用零等待 TryLock；首次／映射变化先填充并冻结新位图，再一起发布像素和坐标，同一区域后续变化复用可写位图。背景视觉与表面染色／描边位于真实正文之前；Aero、展开纸片和设置窗口不采样。采样期间的截图排除及结束恢复原 affinity 保留，开关和数据字段不变。
+`DesktopBackgroundCapture` 在本机内存中用 SRCCOPY 取得一次局部 SDR 背景，按窗口像素预算生成冻结位图，再将像素与坐标一起交给表面；显示期间保留该 scene，位置变化只重新投影，不运行轮询、逐帧上传或可写位图更新。胶囊拖动使用一次半分辨率虚拟桌面快照，贴边与浮动表面共享纹理，结束后再取得最终局部背景。每个已有辅助表面由 `SkinBorder` 合并队列交接与拖动准备这两个暂停原因，起拖即撤销局部采样，不等待拖动结果返回才排他。两类采样共用作用域内的原生截图排除清理；取消必须同步恢复 affinity，旧 worker 退出只能幂等释放自己的资源，不能修改复用 HWND 的新生命周期。`BackgroundSession.Stop` 只释放 scene／capture，不解除仍由外层持有的暂停。暂停阻止新采样，但不阻止材质模式、系统效果或拖动透明度失效时的正常回退；队列 cover 的合法呈现淡出仍保留 live source 像素。菜单的内侧保护区覆盖最强模糊核；背景视觉位于正文之前，Aero、展开纸片和设置窗口不采样。
 
 `MaterialMenuOpening` 只延后需要软件背景的菜单打开请求。每次请求拥有一个取消生命周期；关闭或 owner 卸载仅撤销该请求，异步任务独自负责释放，迟到结果不得重新打开菜单或进入后续请求。成功时在 HWND 出现前上传冻结首帧，最终 WPF arrange 决定位置，再用 SetCurrentValue 重放仍有效的打开请求；不恢复系统淡入，不增加预热窗口或前景隐藏。失败／超时仅在本次使用静态回退。设置切页继续保留原生外壳和同一编辑器；首次 Clear Acrylic 仍等待实际 ContentRendered。`MaterialRelief` 只复用相同深度／法线的 Aero 直边照明，圆角仍解析计算，逐像素结果与未缓存算法对照。理由与历史修复见 D-053；当前一次性静态快照与拖动纹理边界见 D-054；真实 Windows 11、HDR、混合 DPI 和高刷新率观感仍需人工验收。
 
@@ -401,7 +403,7 @@ Production translation backend 不承担 snapshot、clip/scale/effect resize 或
 
 真实 docked HWND、queue compositor cover、floating drag HWND 是显式 visual authority。任何 publication、successor、handoff 或 rollback 边界都必须保证至少有一个可见 authority。
 
-同队列 successor 继承 predecessor 当前 live authority 和可见 sample，而不是 dispose 后冷启动另一套互不相关 proxy。
+同队列 successor 继承 predecessor 当前 live authority 和可见 sample，而不是 dispose 后冷启动另一套互不相关 proxy。端点提交期间 predecessor 仍可继续移动；successor 校准起点后，显示取样、输入命中、点击坐标转交和下一代临时 cover 均使用本代 `VisualState` 实际提交给 DComp 的起止偏移及同一动画时钟，不能继续沿用较早捕获的 plan 起点。该校准只调整平移，WPF 的形状、内容、opacity 和真实端点容量仍沿用原有 presentation contract。
 
 代理收到按下消息时保存原始客户区坐标转换得到的屏幕位置和按键状态。只有这次按下触发的同步 authority handoff 当场成功，才把该按下消息转交给真实端点；一旦需要 completion retry、cover 丢失或目标已失效，就直接丢弃该按下，不跨重试保存或迟到重放。该路径只转交原始按下消息，不承诺合成完整按下—抬起手势；正常 Windows 输入仍由真实端点接管。
 
@@ -509,5 +511,3 @@ same AvalonEdit TextView
 - Full 固定槽位对应的引用竖线直接读取 TextView 的实际坐标；有序列表的续行对齐及 Basic/Enhanced 定位保持原行为。省略 `>` 的惰性续行由 `QuoteIndentElement` 占位，并与真实引用共用“引用槽宽 + 原生空格宽”；该元素仍可合并消费同偏移的塌缩语法，保持一份源码和光标边界。
 - 图片 `i:` 协议、URL 打开白名单、原生保存仍属于 PaperTodo host concern；图片是否位于 code/container 等 Markdown 语义由同一 Markdig snapshot 决定。启动图片 GC 额外采用保守保护扫描，允许多保留但不因 parser 分歧误删 blob。
 - `MarkdownFencedCodeScanner` 只保留在“边界发现/受限预览”角色：Edge Mini 的有限导航近似以及大 Note incremental fence-window discovery 可以使用；它不是正文、持久化或数据回收的 Markdown authority，也不扩展成第二套 container-aware Markdown parser。
-
-
