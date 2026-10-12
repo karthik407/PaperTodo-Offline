@@ -41,6 +41,7 @@ internal static partial class Program
         var controller = (AppController)RuntimeHelpers.GetUninitializedObject(typeof(AppController));
         Field(controller, "<State>k__BackingField", new AppState());
         Field(controller, "_windows", new Dictionary<string, PaperWindow>());
+        Field(controller, "_masterCapsules", new Dictionary<string, MasterCapsuleWindow>());
         return controller;
     }
     private static PaperSettingDefinition Boolean(string id, Func<bool> read, Action<bool> write, Action publish) => new()
@@ -64,7 +65,9 @@ internal static partial class Program
         try
         {
             ServiceBehavior();
+            StartupApprovalBehavior();
             CatalogBehavior();
+            TopBarShortcutBehavior();
             TodoMoveBehavior();
             AdapterBehavior();
             SharedUiSettingBehavior();
@@ -79,6 +82,123 @@ internal static partial class Program
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
 
+    private static void TopBarShortcutBehavior()
+    {
+        var state = new AppState();
+        Check(PaperTopBarShortcuts.Pinned(state).SequenceEqual(
+                  [PaperTopBarShortcuts.NewTodo, PaperTopBarShortcuts.NewNote]) &&
+              PaperTopBarShortcuts.Menu(state).SequenceEqual(
+                  [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.ExternalEditor]),
+            "New installations show two creation actions, with association/editor in the menu.");
+        Check(PaperTopBarShortcuts.MoveTo(state, PaperTopBarShortcuts.Association, true, 1) &&
+              PaperTopBarShortcuts.Pinned(state).SequenceEqual(
+                  [PaperTopBarShortcuts.NewTodo, PaperTopBarShortcuts.Association,
+                   PaperTopBarShortcuts.NewNote]),
+            "Dragging a menu command above the divider pins it at the insertion slot.");
+        Check(PaperTopBarShortcuts.MoveTo(state, PaperTopBarShortcuts.NewTodo, false, 0) &&
+              PaperTopBarShortcuts.Pinned(state).SequenceEqual(
+                  [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.NewNote]) &&
+              PaperTopBarShortcuts.Menu(state).SequenceEqual(
+                  [PaperTopBarShortcuts.NewTodo, PaperTopBarShortcuts.ExternalEditor]),
+            "Dragging to the lower group moves only one action without changing other ordering.");
+        Check(!PaperTopBarShortcuts.MoveTo(state, PaperTopBarShortcuts.NewTodo, false, 0),
+            "Dropping in the same slot is a true no-op.");
+        Check(PaperTopBarShortcuts.MoveTo(state, PaperTopBarShortcuts.NewNote, true, 0) &&
+              PaperTopBarShortcuts.Pinned(state).SequenceEqual(
+                  [PaperTopBarShortcuts.NewNote, PaperTopBarShortcuts.Association]),
+            "Reordering within one group preserves divider membership.");
+        Check(PaperTopBarShortcuts.Contains(state, PaperTypes.Note,
+                  PaperTopBarShortcuts.NewNote) &&
+              !PaperTopBarShortcuts.Contains(state, PaperTypes.Todo,
+                  PaperTopBarShortcuts.ExternalEditor) &&
+              !PaperTopBarShortcuts.IsApplicable(PaperTypes.Todo,
+                  PaperTopBarShortcuts.ExternalEditor),
+            "One global selection filters commands unavailable on the current paper.");
+        Check(PaperTopBarShortcuts.NormalizeOrder(
+                  [PaperTopBarShortcuts.ExternalEditor, PaperTopBarShortcuts.ExternalEditor,
+                   PaperTopBarShortcuts.PluginActions, "unknown"])
+                  .SequenceEqual(
+                  [PaperTopBarShortcuts.ExternalEditor, PaperTopBarShortcuts.NewTodo,
+                   PaperTopBarShortcuts.NewNote, PaperTopBarShortcuts.Association]),
+            "Duplicates and obsolete plugin pins never enter the new global configuration.");
+
+        var controller = Controller();
+        controller.State.TopBarShortcutOrder =
+            [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.NewTodo,
+             PaperTopBarShortcuts.NewNote, PaperTopBarShortcuts.ExternalEditor];
+        controller.State.TopBarPinnedCount = 1;
+        var priorOrder = controller.State.TopBarShortcutOrder.ToArray();
+        var failed = SettingsFor(controller, () => false, _ => { });
+        Throws<PaperSettingsException>(
+            () => failed.Set("topbar.new_note", Json(true)), "save_failed");
+        Check(controller.State.TopBarPinnedCount == 1 &&
+              controller.State.TopBarShortcutOrder.SequenceEqual(priorOrder),
+            "Failed legacy API writes restore both global order and divider.");
+
+        var commits = 0;
+        var service = SettingsFor(controller, () => { commits++; return true; }, _ => { });
+        Check(service.Set("topbar.new_note", Json(true)).Changed &&
+              PaperTopBarShortcuts.IsPinned(controller.State, PaperTopBarShortcuts.NewNote) &&
+              controller.State.TopBarPinnedCount == 2 && commits == 1,
+            "Legacy topbar.new_note moves the action across the global divider.");
+        Check(!service.Set("topbar.new_note", Json(true)).Changed && commits == 1,
+            "Repeated legacy API writes are genuine no-ops.");
+        Check(service.Set("topbar.new_todo", Json(false)).Changed == false,
+            "Unpinned action remains unpinned on an explicit false legacy write.");
+        Check(service.Set("topbar.external_open", Json(true)).Changed &&
+              PaperTopBarShortcuts.IsPinned(controller.State, PaperTopBarShortcuts.ExternalEditor),
+            "The old external-open alias also updates the single global layout.");
+
+        var temp = Path.Combine(Path.GetTempPath(), "PaperTodo-TopBar-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            var legacy = new AppState
+            {
+                TodoTopBarShortcuts =
+                    [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.NewTodo,
+                     PaperTopBarShortcuts.PluginActions],
+                NoteTopBarShortcuts =
+                    [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.ExternalEditor,
+                     PaperTopBarShortcuts.NewNote, PaperTopBarShortcuts.PluginActions]
+            };
+            var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            var root = System.Text.Json.Nodes.JsonNode.Parse(
+                JsonSerializer.Serialize(legacy, options))!.AsObject();
+            root.Remove("topBarShortcutOrder");
+            root.Remove("topBarPinnedCount");
+            File.WriteAllText(Path.Combine(temp, "data.json"), root.ToJsonString());
+            var store = new StateStore(temp, DurableAtomicFileWriter.Shared);
+            var loaded = store.Load();
+            Check(PaperTopBarShortcuts.Pinned(loaded).SequenceEqual(
+                      [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.NewTodo,
+                       PaperTopBarShortcuts.ExternalEditor, PaperTopBarShortcuts.NewNote]) &&
+                  loaded.TodoTopBarShortcuts == null && loaded.NoteTopBarShortcuts == null,
+                "Different Todo and Note layouts migrate to one union; old lists stop being authoritative.");
+
+            PaperTopBarShortcuts.MoveTo(loaded, PaperTopBarShortcuts.NewNote, false, 0);
+            File.WriteAllText(Path.Combine(temp, "data.json"),
+                JsonSerializer.Serialize(loaded, options));
+            var reloaded = store.Load();
+            Check(reloaded.TopBarPinnedCount == 3 &&
+                  PaperTopBarShortcuts.Menu(reloaded).SequenceEqual([PaperTopBarShortcuts.NewNote]) &&
+                  reloaded.TodoTopBarShortcuts == null,
+                "A deliberate menu position survives restart without migrating again.");
+
+            root.Remove("todoTopBarShortcuts");
+            root.Remove("noteTopBarShortcuts");
+            root["showTopBarNewTodoButton"] = false;
+            root["showTopBarNewNoteButton"] = true;
+            root["showTopBarExternalOpenButton"] = false;
+            File.WriteAllText(Path.Combine(temp, "data.json"), root.ToJsonString());
+            var older = store.Load();
+            Check(PaperTopBarShortcuts.Pinned(older).SequenceEqual(
+                [PaperTopBarShortcuts.Association, PaperTopBarShortcuts.NewNote]),
+                "Pre-341 visibility booleans migrate through the same one-time global path.");
+        }
+        finally { Directory.Delete(temp, recursive: true); }
+    }
+
     private static void PostCommitFailureDoesNotReplay()
     {
         var c = Controller();
@@ -86,6 +206,44 @@ internal static partial class Program
         c.RunMcpPostCommitUi(() => { calls++; throw new InvalidOperationException("UI refresh failed"); });
         DrainSettingsUi();
         Check(calls == 1, "A failed post-commit UI update must not replay its partial side effects.");
+    }
+
+    private static void StartupApprovalBehavior()
+    {
+        const string path = @"C:\Program Files\PaperTodo\PaperTodo.exe";
+        bool Enabled(object? runValue, object? approvalValue) =>
+            SystemSettingsHelper.IsStartupEnabled(runValue, approvalValue, path);
+
+        Check(Enabled($"\"{path}\"", null),
+            "A matching Run entry without StartupApproved state remains enabled.");
+        Check(Enabled(path, new byte[12]),
+            "A zeroed 12-byte StartupApproved value remains enabled.");
+        Check(Enabled(path, new byte[] { 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "StartupApproved 0x02 with a clear timestamp remains enabled.");
+        Check(Enabled(path, new byte[] { 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "StartupApproved 0x06 with a clear timestamp remains enabled.");
+        Check(!Enabled(path, new byte[] { 0x03, 0, 0, 0, 0xA5, 0x20, 0xF6, 0x4A, 0x95, 0xD7, 0xD9, 0x01 }),
+            "Task Manager disabled state with a timestamp overrides the Run entry.");
+        Check(!Enabled(path, new byte[] { 0x07, 0, 0, 0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80 }),
+            "Alternate disabled state with a timestamp overrides the Run entry.");
+        Check(Enabled(path, new byte[] { 0x06, 0, 0, 0, 0x1E, 0x38, 0x9F, 0x4C, 0x7D, 0x2A, 0xDB, 0x01 }),
+            "A re-enabled StartupApproved 0x06 record remains enabled with a historical timestamp.");
+        Check(Enabled(path, new byte[] { 0x02, 0, 0, 0, 0x1E, 0x38, 0x9F, 0x4C, 0x7D, 0x2A, 0xDB, 0x01 }),
+            "An enabled approval state is independent of its historical timestamp.");
+        Check(!Enabled(path, new byte[] { 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "Disabled StartupApproved 0x03 overrides the Run entry even without a timestamp.");
+        Check(!Enabled(path, new byte[] { 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "Disabled StartupApproved 0x07 overrides the Run entry even without a timestamp.");
+        Check(!Enabled(path, new byte[] { 0x08, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "An unknown approval state fails closed even with a clear timestamp.");
+        Check(!Enabled(path, new byte[] { 0x02, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }),
+            "Approval matching checks the entire state DWORD, not just its first byte.");
+        Check(!Enabled(path, "020000000000000000000000"),
+            "A non-binary approval value fails closed.");
+        Check(!Enabled(path, new byte[] { 0x02 }),
+            "Malformed short StartupApproved state fails closed.");
+        Check(!Enabled(@"C:\Old\PaperTodo.exe", null),
+            "A stale Run path is not reported as enabled.");
     }
 
     private static void ServiceBehavior()
@@ -321,6 +479,82 @@ internal static partial class Program
 
     private static async Task PipeAndUnlinkBehavior()
     {
+        var wrongTodoShape = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "add_todos",
+            Arguments = new Dictionary<string, JsonElement>
+            {
+                ["paper_id"] = Json("paper"),
+                ["todos"] = Json(new[] { "first", "second" })
+            }
+        };
+        Check(
+            McpBridge.TryDescribeInvalidToolArguments(
+                wrongTodoShape,
+                out var wrongTodoShapeMessage) &&
+            wrongTodoShapeMessage.Contains(
+                "invalid_params",
+                StringComparison.Ordinal) &&
+            wrongTodoShapeMessage.Contains(
+                "todos[0]",
+                StringComparison.Ordinal),
+            "MCP binding errors identify the invalid collection item.");
+
+        var missingTodoText = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "add_todos",
+            Arguments = new Dictionary<string, JsonElement>
+            {
+                ["paper_id"] = Json("paper"),
+                ["todos"] = Json(new[] { new { done = false } })
+            }
+        };
+        Check(
+            McpBridge.TryDescribeInvalidToolArguments(
+                missingTodoText,
+                out var missingTodoTextMessage) &&
+            missingTodoTextMessage.Contains(
+                "text",
+                StringComparison.Ordinal),
+            "MCP binding errors identify missing nested required fields.");
+
+        var toolTarget = new McpTools(new McpPipeClient("unused"));
+        var updateTool = ModelContextProtocol.Server.McpServerTool.Create(
+            typeof(McpTools).GetMethod(nameof(McpTools.UpdateTodo))!,
+            toolTarget);
+        Check(
+            updateTool.ProtocolTool.InputSchema
+                .GetProperty("properties")
+                .TryGetProperty("order", out _),
+            "MCP update_todo schema exposes order.");
+
+        var createNoteTool = ModelContextProtocol.Server.McpServerTool.Create(
+            typeof(McpTools).GetMethod(nameof(McpTools.CreateNote))!,
+            toolTarget);
+        var createNoteTitleSchema = createNoteTool.ProtocolTool.InputSchema
+            .GetProperty("properties")
+            .GetProperty("title");
+        Check(
+            createNoteTitleSchema
+                .GetProperty("description")
+                .GetString()?
+                .Contains("title.max_length", StringComparison.Ordinal) == true &&
+            !createNoteTitleSchema.TryGetProperty("maxLength", out _),
+            "MCP create_note schema describes the dynamic title limit without advertising a false fixed maxLength.");
+
+        var validTodoShape = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "add_todos",
+            Arguments = new Dictionary<string, JsonElement>
+            {
+                ["paper_id"] = Json("paper"),
+                ["todos"] = Json(new[] { new { text = "first", done = false } })
+            }
+        };
+        Check(
+            !McpBridge.TryDescribeInvalidToolArguments(validTodoShape, out _),
+            "MCP error translation leaves valid tool arguments alone.");
+
         var name = "PaperTodo.SettingsChecks." + Guid.NewGuid().ToString("N");
         var requests = new List<JsonElement>();
         McpApiHost? host = null;
@@ -336,6 +570,8 @@ internal static partial class Program
             var tools = new McpTools(new McpPipeClient(name));
             await tools.UpdateTodo("paper", "todo", text: "short");
             Check(!requests[^1].GetProperty("params").TryGetProperty("linked_paper_id", out _), "Omitted link is omitted on the real pipe.");
+            await tools.UpdateTodo("paper", "todo", order: 0);
+            Check(requests[^1].GetProperty("params").GetProperty("order").GetInt32() == 0, "Todo order survives actual tool serialization.");
             await tools.UpdateTodo("paper", "todo", linked_paper_id: "note");
             Check(requests[^1].GetProperty("params").GetProperty("linked_paper_id").GetString() == "note", "Binding survives actual tool serialization.");
             await tools.UpdateTodo("paper", "todo", clear_linked_paper: true);

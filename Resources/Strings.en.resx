@@ -652,6 +652,12 @@ Settings info icons always stay available.</value>
   <data name="TipEnableAnimations" xml:space="preserve">
     <value>Transition animations for common actions; off feels more immediate.</value>
   </data>
+  <data name="SettingsFastAnimations" xml:space="preserve">
+    <value>Fast animations</value>
+  </data>
+  <data name="TipFastAnimations" xml:space="preserve">
+    <value>Shorten interface animations to about 60% of their normal duration for faster responses while keeping transitions. This has no effect when animations are disabled.</value>
+  </data>
   <data name="SettingsResizeGripMode" xml:space="preserve">
     <value>Resize grip</value>
   </data>
@@ -1493,5 +1499,47 @@ When off, open at the docked edge or remembered position.</value>
   </data>
   <data name="SkinCaptureNotice" xml:space="preserve">
     <value>Capsules and menus take a temporary local snapshot of the background behind them; capsule dragging takes one low-resolution virtual-desktop snapshot. It is used only in local memory and is never saved or uploaded.</value>
+  </data>
+  <data name="MenuPaperActions" xml:space="preserve">
+    <value>Paper actions</value>
+  </data>
+  <data name="MenuCustomizeTopBar" xml:space="preserve">
+    <value>Customize title bar</value>
+  </data>
+  <data name="MenuReorderTopBar" xml:space="preserve">
+    <value>Reorder shortcuts</value>
+  </data>
+  <data name="MenuTopBarMoveLeft" xml:space="preserve">
+    <value>Move left</value>
+  </data>
+  <data name="MenuTopBarMoveRight" xml:space="preserve">
+    <value>Move right</value>
+  </data>
+  <data name="MenuTopBarAssociationDrag" xml:space="preserve">
+    <value>Hold and drag to associate</value>
+  </data>
+  <data name="MenuTopBarPluginActions" xml:space="preserve">
+    <value>Plugin actions</value>
+  </data>
+  <data name="TopBarSettingsTitle" xml:space="preserve">
+    <value>Top-bar shortcuts</value>
+  </data>
+  <data name="TopBarSettingsHint" xml:space="preserve">
+    <value>Drag to reorder, or move an action between the two areas.</value>
+  </data>
+  <data name="TopBarShownHeading" xml:space="preserve">
+    <value>Show in title bar</value>
+  </data>
+  <data name="TopBarMenuHeading" xml:space="preserve">
+    <value>Show in menu</value>
+  </data>
+  <data name="TopBarEmptyDropArea" xml:space="preserve">
+    <value>Drag an action here</value>
+  </data>
+  <data name="TopBarAssociation" xml:space="preserve">
+    <value>Drag to associate</value>
+  </data>
+  <data name="TopBarExternalEditor" xml:space="preserve">
+    <value>Open externally</value>
   </data>
 </root>

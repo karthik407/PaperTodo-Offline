@@ -152,14 +152,17 @@ Todo papers are crafted for checklists, daily agendas, and bite-sized action ite
 ### 3.1 Adding & Editing Items
 
 - **New Item**: Click the bottom blank line to type; press <kbd>Enter</kbd> to commit and automatically insert a new item below.
+- **Line Break**: Press <kbd>Shift</kbd> + <kbd>Enter</kbd> to start a new line in the same todo.
+- **Fold Long Items**: When text occupies more than four displayed lines, use the small arrow above the right drag grip to fold it to two lines or expand it. The folded two-line preview ends with a visual ellipsis; focusing the item restores its full, unmodified text for editing.
 - **Edit & Double-Click Selection**: Single-click text to edit; **double-click** text to select the entire line for quick replacement.
 - **Quick Delete Blank Line**: Press <kbd>Backspace</kbd> on an unmarked empty line to delete it immediately.
+- **Find Hidden Text**: Search matches hidden by a long todo's fold highlight that row and its expand arrow without expanding the text.
 - **Smart Multi-Line Paste**: When pasting multi-line text from clipboard, PaperTodo strips bullet points (`-`, `*`), numbers (`1.`, `2.`), and task checkboxes (`- [ ]`), splitting text into discrete tasks.
 - **Undo & Redo**: Standard <kbd>Ctrl</kbd> + <kbd>Z</kbd> (undo) and <kbd>Ctrl</kbd> + <kbd>Y</kbd> (redo).
 
 ### 3.2 Ordering, Deletion & Batch Actions
 
-- **Drag Reorder & Delete**: Hold the right handle (`≡`) and drag vertically to adjust order; drag down to the bottom trash zone to delete.
+- **Drag Reorder & Delete**: Hold the right handle (`≡`) to reorder. Hovering near list edges auto-scrolls, even with a stationary pointer. If the trash zone moves under the pointer, including through auto-scrolling, it previews deletion without pausing edge scrolling. Drag away to cancel the preview; release over the trash to delete.
 - **Continuous Swipe Multi-Selection**: Hold and drag left-click across items from the left margin to continuously select multiple rows.
 - **Batch Actions**: Once selected, batch check/uncheck, press <kbd>Ctrl</kbd> + <kbd>C</kbd> to copy, right-click to delete all, or drag the group to the trash.
 
@@ -287,6 +290,7 @@ Hovering over a docked capsule slides out a **real-time interactive preview card
 The top-most capsule in the dock is the **Master Capsule**:
 - **Batch Toggle**: Click to expand or collapse the entire edge queue;
 - **Height Offset**: Drag up and down to adjust the queue's vertical anchor on screen;
+- **Move the whole queue**: Pull the master capsule horizontally to temporarily retract the queue and switch to the same floating drag capsule used by ordinary edge items. Drop it on the left or right side of the target monitor to move the whole queue while preserving member order;
 - **Global Menu**: Right-click to access the full system tray menu directly.
 
 ---

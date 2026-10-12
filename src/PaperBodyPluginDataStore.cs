@@ -45,15 +45,22 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
 
     private sealed class PaperDataState
     {
-        public int StateVersion { get; set; } = 1;
-        public JsonElement Data { get; set; } =
+        public int StateVersion { get; init; } = 1;
+        public JsonElement Data { get; init; } =
             JsonSerializer.SerializeToElement(new { });
     }
 
+    private readonly record struct SaveSnapshot(
+        string ProviderId,
+        long Revision,
+        PluginDataDocument Document);
+
     private readonly object _gate = new();
+    private readonly object _writeGate = new();
     private readonly Dictionary<string, PluginDataDocument> _cache =
         new(StringComparer.Ordinal);
     private readonly HashSet<string> _dirtyProviderIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _providerRevisions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _saveFailureAttempts = new(StringComparer.Ordinal);
     private readonly Timer _saveTimer;
     private readonly Timer _forceSaveTimer;
@@ -327,19 +334,9 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
                         continue;
                     }
 
-                    try
-                    {
-                        SaveNow(providerId, document);
-                        _dirtyProviderIds.Remove(providerId);
-                        _saveFailureAttempts.Remove(providerId);
-                    }
-                    catch
-                    {
-                        // One direct cleanup write already failed. Keep it dirty and allow one
-                        // delayed retry; another real mutation will reset the retry budget.
-                        _dirtyProviderIds.Add(providerId);
-                        _saveFailureAttempts[providerId] = 1;
-                    }
+                    // Core deletion is already committed. Persist this independent mutation
+                    // through the same ordered writer as settings and plugin state updates.
+                    ScheduleSave(providerId);
                 }
                 catch
                 {
@@ -347,8 +344,6 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
                     // cleanup of other plugins. Reads of that plugin still report the original failure.
                 }
             }
-
-            UpdateSaveTimersAfterFlush();
         }
     }
 
@@ -452,6 +447,7 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
     {
         var startForceTimer = _dirtyProviderIds.Count == 0;
         _dirtyProviderIds.Add(providerId);
+        _providerRevisions[providerId] = _providerRevisions.GetValueOrDefault(providerId) + 1;
         _saveFailureAttempts[providerId] = 0;
         if (_suppressFinalFlushOnDispose)
         {
@@ -467,45 +463,109 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
 
     private void FlushDirty()
     {
+        // A slow write must not accumulate waiting timer callbacks or hold up UI state access.
+        // The current writer rearms any dirty work that arrives while it owns this gate.
+        if (!Monitor.TryEnter(_writeGate))
+        {
+            return;
+        }
+
+        try
+        {
+            SaveSnapshot[] snapshots;
+            lock (_gate)
+            {
+                if (_disposed ||
+                    _suppressFinalFlushOnDispose ||
+                    _dirtyProviderIds.Count == 0)
+                {
+                    return;
+                }
+
+                snapshots = CaptureDirtySnapshots(includeFailed: false);
+            }
+
+            foreach (var snapshot in snapshots)
+            {
+                WriteSnapshot(snapshot);
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                // Release the writer before rearming: even an immediate timer callback can
+                // become the next writer. The state gate keeps its capture after this update.
+                Monitor.Exit(_writeGate);
+                if (!_disposed && !_suppressFinalFlushOnDispose)
+                {
+                    UpdateSaveTimersAfterFlush();
+                }
+            }
+        }
+    }
+
+    // Call under _gate. Dirty providers are already loaded; only their mutable dictionaries
+    // need copying. JsonElement and the stored PaperDataState values are immutable.
+    private SaveSnapshot[] CaptureDirtySnapshots(bool includeFailed) =>
+        _dirtyProviderIds
+            .Where(providerId => includeFailed ||
+                _saveFailureAttempts.GetValueOrDefault(providerId) < 2)
+            .Select(providerId =>
+            {
+                var document = _cache[providerId];
+                return new SaveSnapshot(
+                    providerId,
+                    _providerRevisions[providerId],
+                    new PluginDataDocument
+                    {
+                        StorageVersion = document.StorageVersion,
+                        Settings = new(document.Settings, StringComparer.Ordinal),
+                        Runtime = document.Runtime,
+                        Papers = new(document.Papers, StringComparer.Ordinal)
+                    });
+            })
+            .ToArray();
+
+    // The caller owns _writeGate so temp-file replacement and normal final flush stay ordered.
+    private void WriteSnapshot(SaveSnapshot snapshot)
+    {
+        var succeeded = false;
+        try
+        {
+            SaveNow(snapshot.ProviderId, snapshot.Document);
+            succeeded = true;
+        }
+        catch
+        {
+            // Keep the same bounded retry policy; a later mutation has its own retry budget.
+        }
+
         lock (_gate)
         {
-            if (_disposed ||
-                _suppressFinalFlushOnDispose ||
-                _dirtyProviderIds.Count == 0)
+            if (_providerRevisions[snapshot.ProviderId] != snapshot.Revision)
             {
                 return;
             }
 
-            foreach (var providerId in _dirtyProviderIds.ToArray())
+            if (succeeded)
             {
-                var failures = _saveFailureAttempts.GetValueOrDefault(providerId);
-                if (failures >= 2)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    SaveNow(providerId, Load(providerId));
-                    _dirtyProviderIds.Remove(providerId);
-                    _saveFailureAttempts.Remove(providerId);
-                }
-                catch
-                {
-                    // Keep the provider dirty, but spend only one delayed retry without requiring
-                    // another mutation. A second failure waits for the next real mutation or exit.
-                    _saveFailureAttempts[providerId] = failures + 1;
-                }
+                _dirtyProviderIds.Remove(snapshot.ProviderId);
+                _saveFailureAttempts.Remove(snapshot.ProviderId);
             }
-
-            UpdateSaveTimersAfterFlush();
+            else
+            {
+                _saveFailureAttempts[snapshot.ProviderId] =
+                    _saveFailureAttempts.GetValueOrDefault(snapshot.ProviderId) + 1;
+            }
         }
     }
 
     private void UpdateSaveTimersAfterFlush()
     {
         _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-        if (_suppressFinalFlushOnDispose ||
+        if (_disposed ||
+            _suppressFinalFlushOnDispose ||
             _dirtyProviderIds.Count == 0 ||
             !_dirtyProviderIds.Any(providerId =>
                 _saveFailureAttempts.GetValueOrDefault(providerId) < 2))
@@ -514,6 +574,13 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
             return;
         }
 
+        if (_dirtyProviderIds.Any(providerId =>
+                _saveFailureAttempts.GetValueOrDefault(providerId) == 0))
+        {
+            // A mutation during the write still gets the normal debounce, even if its original
+            // timer fired while _writeGate was busy. It is not a failed-write retry.
+            _saveTimer.Change(_saveDebounceMilliseconds, Timeout.Infinite);
+        }
         _forceSaveTimer.Change(_forceSaveMilliseconds, Timeout.Infinite);
     }
 
@@ -525,18 +592,21 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
 
     internal void SuppressFinalFlushOnDispose()
     {
-        lock (_gate)
+        lock (_writeGate)
         {
-            if (_disposed)
+            lock (_gate)
             {
-                return;
-            }
+                if (_disposed)
+                {
+                    return;
+                }
 
-            // Waiting for the gate lets any write already inside FlushDirty/SaveNow finish first.
-            // Once this flag is set, queued timer callbacks and disposal must not start new writes.
-            _suppressFinalFlushOnDispose = true;
-            _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            _forceSaveTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                // Wait for the active writer without holding the state gate. Once this flag is
+                // set, queued timer callbacks and disposal must not start any more writes.
+                _suppressFinalFlushOnDispose = true;
+                _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                _forceSaveTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            }
         }
     }
 
@@ -560,30 +630,28 @@ internal sealed class PaperBodyPluginDataStore : IDisposable
 
     public void Dispose()
     {
-        lock (_gate)
+        lock (_writeGate)
         {
-            if (_disposed)
+            SaveSnapshot[] snapshots;
+            lock (_gate)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                _forceSaveTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                _disposed = true;
+                snapshots = _suppressFinalFlushOnDispose
+                    ? []
+                    : CaptureDirtySnapshots(includeFailed: true);
             }
 
-            _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            _forceSaveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            if (!_suppressFinalFlushOnDispose)
+            foreach (var snapshot in snapshots)
             {
-                foreach (var providerId in _dirtyProviderIds.ToArray())
-                {
-                    try
-                    {
-                        SaveNow(providerId, Load(providerId));
-                        _dirtyProviderIds.Remove(providerId);
-                    }
-                    catch
-                    {
-                    }
-                }
+                WriteSnapshot(snapshot);
             }
-            _disposed = true;
         }
         _saveTimer.Dispose();
         _forceSaveTimer.Dispose();

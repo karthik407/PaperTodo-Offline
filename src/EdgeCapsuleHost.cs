@@ -1325,6 +1325,11 @@ internal sealed partial class EdgeCapsuleHost : IDisposable
         return default;
     }
 
+    internal void BeginDragBackground()
+    {
+        if (!_disposed && Chrome is SkinBorder skin) skin.BeginDragBackground();
+    }
+
     internal void UseDragBackground(DesktopBackgroundCapture.Snapshot snapshot)
     {
         if (!_disposed && Chrome is SkinBorder skin) skin.UseDragBackground(snapshot);
@@ -1333,6 +1338,14 @@ internal sealed partial class EdgeCapsuleHost : IDisposable
     internal void EndDragBackground()
     {
         if (!_disposed && Chrome is SkinBorder skin) skin.EndDragBackground();
+    }
+
+    internal void SetSampledBackgroundCaptureSuspended(bool suppressed)
+    {
+        if (!_disposed && Chrome is SkinBorder skin)
+        {
+            skin.SetSampledBackgroundCaptureSuspended(suppressed);
+        }
     }
 
     internal void RefreshSkin()

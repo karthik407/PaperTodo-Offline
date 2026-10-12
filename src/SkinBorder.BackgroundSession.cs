@@ -40,6 +40,7 @@ internal sealed partial class SkinBorder
         private string? _requestedSkin;
         private bool _failed;
         private bool _evidenceFrozen;
+        private bool _captureSuspended;
         private bool _recaptureRequested = true;
         private bool _dragSnapshotActive;
 
@@ -106,6 +107,23 @@ internal sealed partial class SkinBorder
             BackgroundFailure = null;
         }
 
+        internal void SetCaptureSuspended(bool suspended)
+        {
+            if (_captureSuspended == suspended)
+            {
+                return;
+            }
+
+            _captureSuspended = suspended;
+            if (suspended)
+            {
+                CancelCapture();
+                // Keep the current scene as compositor pixels, but require one fresh endpoint
+                // snapshot before the settled real HWND considers that scene current again.
+                _recaptureRequested = true;
+            }
+        }
+
         private DesktopBackgroundCapture.Region? CaptureRegion(IntPtr hwnd)
         {
             if (!DesktopBackgroundCapture.TryGetBounds(hwnd, out var bounds)) return null;
@@ -137,16 +155,27 @@ internal sealed partial class SkinBorder
                 !_owner._highContrast && PaperSkins.UsesNativeBackdrop(_owner.Skin)
                     ? PresentationSource.FromVisual(_owner) as HwndSource
                     : null;
-            var active = _owner.RequestsSampledBackground &&
-                _owner.IsLoaded && _owner.IsVisible && !_owner._highContrast &&
-                _owner.IsMaterialHostVisible && _owner.ActualWidth >= 8 && _owner.ActualHeight >= 8 &&
+            var materialRequested = _owner.RequestsSampledBackground && !_owner._highContrast &&
                 DwmMicaApi.Instance.CompositionEnabled && DwmMicaApi.Instance.TransparencyEnabled;
+            var active = materialRequested &&
+                _owner.IsLoaded && _owner.IsVisible &&
+                _owner.IsMaterialHostVisible && _owner.ActualWidth >= 8 && _owner.ActualHeight >= 8;
 
             if (!active)
             {
+                // A queue cover fades its retained live source through presentation opacity.
+                // Preserve those pixels while that source exists, but never preserve a disabled
+                // material recipe. A drag-only pause still obeys ordinary opacity/visibility
+                // fallback: pausing acquisition does not grant permission to keep painting it.
+                if (_captureSuspended && _owner._sampledBackgroundCaptureSuspended &&
+                    materialRequested && _owner.IsLoaded && _owner.IsVisible &&
+                    source is { IsDisposed: false } && DesktopBackgroundCapture.IsVisible(source.Handle))
+                {
+                    return;
+                }
                 // A menu frame is prepared before Popup.IsOpen and can briefly be arranged before
                 // SHOWWINDOW. Keep that one immutable scene until the menu is actually unloaded.
-                if (_owner.IsMenu && _scene?.Layout != null && _owner.RequestsSampledBackground &&
+                if (_owner.IsMenu && _scene?.Layout != null && materialRequested &&
                     !_owner.SuppressStaticBackgroundForOpening)
                 {
                     return;
@@ -159,6 +188,8 @@ internal sealed partial class SkinBorder
                 }
                 return;
             }
+
+            if (_captureSuspended) return;
 
             if (_dragSnapshotActive)
             {
@@ -243,7 +274,11 @@ internal sealed partial class SkinBorder
 
         internal void UseDragSnapshot(DesktopBackgroundCapture.Snapshot snapshot)
         {
-            if (!_owner.IsCapsule || !PaperSkins.UsesSampledAuxiliary(_owner.Skin)) return;
+            // A drag frame may finish after full material was disabled or preview took over.
+            // Reuse the current material request policy; a late result cannot reactivate it.
+            if (!_owner.IsCapsule || !_owner.RequestsSampledBackground ||
+                !_owner.IsLoaded || !_owner.IsVisible || !_owner.IsMaterialHostVisible ||
+                _owner._highContrast || !DwmMicaApi.Instance.EffectsEnabled) return;
             _dragSnapshotActive = true;
             CancelCapture();
             SetScene(snapshot.Layout, snapshot.Bitmap, snapshot.PreBlurred);
@@ -405,6 +440,8 @@ internal sealed partial class SkinBorder
             CancelCapture();
             ClearScene();
             _dragSnapshotActive = false;
+            // Only the surface's queue/drag owners can lift acquisition suspension. In particular,
+            // an opacity fallback must not silently re-enable a local worker during a pending drag.
             _recaptureRequested = true;
         }
     }

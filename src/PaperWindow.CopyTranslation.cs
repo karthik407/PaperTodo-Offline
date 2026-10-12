@@ -98,7 +98,7 @@ public sealed partial class PaperWindow
         }
 
         var source = e.OriginalSource as DependencyObject;
-        var owner = FindCopyTranslationContextMenuOwner(source, window);
+        var owner = FindContextMenuOwner(source, window);
         var menu = owner?.ContextMenu;
         if (menu == null || HasCopyTranslationMenuItem(menu))
         {
@@ -133,7 +133,7 @@ public sealed partial class PaperWindow
         }
     }
 
-    private static FrameworkElement? FindCopyTranslationContextMenuOwner(
+    private static FrameworkElement? FindContextMenuOwner(
         DependencyObject? source,
         PaperWindow window)
     {

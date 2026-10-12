@@ -97,7 +97,8 @@ public sealed partial class AppController
         if (id == "note.external_extension") return; // The live editor is synchronized by its effect.
         var region = id switch
         {
-            "appearance.animations" or "window.fullscreen_mode" => "general.options",
+            "appearance.animations" or "appearance.fast_animations" or
+                "window.fullscreen_mode" => "general.options",
             "title.max_length" or "capsule.title_measure_limit" or "capsule.hide_close_button" or
                 "capsule.master_compact" => "general.capsuleAppearance",
             "capsule.gap" or "window.resize_grip" or "note.image_reference_text" => "visual.options",
@@ -108,7 +109,8 @@ public sealed partial class AppController
             _ when id.StartsWith("todo.reminder", StringComparison.Ordinal) => "labs.reminders",
             _ => id.Split('.')[0] switch
             {
-                "general" or "topbar" => "general.options",
+                "general" => "general.options",
+                "topbar" => "general.topbar",
                 "privacy" => "general.telemetry",
                 "appearance" => "visual.options",
                 "todo" => "general.todos",

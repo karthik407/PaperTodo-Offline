@@ -34,6 +34,8 @@ public sealed partial class AppController
     private ScrollViewer? _settingsPageScrollViewer;
     private SettingsPage? _settingsPageScrollViewerPage;
     private Window? _settingsWindow;
+    private DispatcherTimer? _settingsStartupRefreshTimer;
+    private bool? _settingsStartupEnabledSnapshot;
     private TextBox? _settingsExternalMarkdownTextBox;
     private CheckBox? _settingsHidePapersFromTaskbarCheckBox;
     private CheckBox? _settingsHidePapersFromWindowSwitcherCheckBox;
@@ -118,7 +120,9 @@ public sealed partial class AppController
 
         resources["PaperScrollThumbBrush"] = Theme.ScrollThumbBrush;
         resources["PaperScrollThumbHoverBrush"] = Theme.ScrollThumbHoverBrush;
-        resources["PaperResizeGripBrush"] = Theme.ResizeGripBrush(State.ResizeGripMode);
+        var gripDots = Theme.ResizeGripBrush(State.ResizeGripMode);
+        resources["PaperResizeGripBrush"] = gripDots;
+        resources["PaperResizeGripTileBrush"] = Theme.ResizeGripTileBrush(gripDots);
     }
 
     private UIElement CreateColorSchemeSegmentSelector()
@@ -562,6 +566,7 @@ public sealed partial class AppController
 
         if (_settingsWindow != null)
         {
+            EnsureSettingsStartupStateRefresh();
             RefreshSettingsWindowContent();
             _settingsWindow.Show();
             _settingsWindow.Activate();
@@ -601,9 +606,11 @@ public sealed partial class AppController
         window.PreviewKeyDown += OnSettingsWindowPreviewKeyDown;
         window.PreviewKeyUp += OnSettingsWindowPreviewKeyUp;
         window.Deactivated += (_, _) => CommitSettingsExternalMarkdownEditor();
+        window.Activated += (_, _) => RefreshSettingsStartupStateFromWindows();
         window.Closed += (_, _) =>
         {
             CommitSettingsExternalMarkdownEditor();
+            StopSettingsStartupStateRefresh();
             _settingsExternalMarkdownTextBox = null;
             _settingsHidePapersFromTaskbarCheckBox = null;
             _settingsHidePapersFromWindowSwitcherCheckBox = null;
@@ -625,6 +632,7 @@ public sealed partial class AppController
             _settingsWindow = null;
         };
         _settingsWindow = window;
+        EnsureSettingsStartupStateRefresh();
         if (UsesNativeMicaWindows)
         {
             _settingsMica = new NativeMicaBackdrop(window, () => window.Content as Border,
@@ -2526,11 +2534,57 @@ public sealed partial class AppController
         }
     }
 
-    private void ToggleStartup() =>
-        SetSettingFromUi("general.startup", !SystemSettingsHelper.IsStartupEnabled());
+    private void ToggleStartup()
+    {
+        var enable = !SystemSettingsHelper.IsStartupEnabled();
+        if (SetSettingFromUi("general.startup", enable))
+        {
+            _settingsStartupEnabledSnapshot = SystemSettingsHelper.IsStartupEnabled();
+        }
+    }
+
+    private void EnsureSettingsStartupStateRefresh()
+    {
+        _settingsStartupEnabledSnapshot = SystemSettingsHelper.IsStartupEnabled();
+        if (_settingsStartupRefreshTimer == null)
+        {
+            _settingsStartupRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _settingsStartupRefreshTimer.Tick += (_, _) => RefreshSettingsStartupStateFromWindows();
+        }
+        _settingsStartupRefreshTimer.Start();
+    }
+
+    private void StopSettingsStartupStateRefresh()
+    {
+        _settingsStartupRefreshTimer?.Stop();
+        _settingsStartupEnabledSnapshot = null;
+    }
+
+    private void RefreshSettingsStartupStateFromWindows()
+    {
+        if (_settingsWindow is not { IsVisible: true } || _settingsPage != SettingsPage.General)
+        {
+            return;
+        }
+
+        var enabled = SystemSettingsHelper.IsStartupEnabled();
+        if (_settingsStartupEnabledSnapshot == enabled)
+        {
+            return;
+        }
+
+        _settingsStartupEnabledSnapshot = enabled;
+        RefreshSettingsForChange("general.startup");
+    }
 
     private void ToggleAnimations() =>
         SetSettingFromUi("appearance.animations", !State.EnableAnimations);
+
+    private void ToggleFastAnimations() =>
+        SetSettingFromUi("appearance.fast_animations", !State.FastAnimations);
 
     private void SetResizeGripMode(string mode) =>
         SetSettingFromUi("window.resize_grip", ResizeGripModes.Normalize(mode));
@@ -2608,13 +2662,16 @@ public sealed partial class AppController
         SetSettingFromUi("capsule.enabled", !State.UseCapsuleMode);
 
     private void ToggleTopBarNewTodoButton() =>
-        SetSettingFromUi("topbar.new_todo", !State.ShowTopBarNewTodoButton);
+        SetSettingFromUi("topbar.new_todo",
+            !PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.NewTodo));
 
     private void ToggleTopBarNewNoteButton() =>
-        SetSettingFromUi("topbar.new_note", !State.ShowTopBarNewNoteButton);
+        SetSettingFromUi("topbar.new_note",
+            !PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.NewNote));
 
     private void ToggleTopBarExternalOpenButton() =>
-        SetSettingFromUi("topbar.external_open", !State.ShowTopBarExternalOpenButton);
+        SetSettingFromUi("topbar.external_open",
+            !PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.ExternalEditor));
 
     private void ToggleLinkedPaperNameDisplay() =>
         SetSettingFromUi("todo.show_linked_paper_name", !State.ShowLinkedPaperName);

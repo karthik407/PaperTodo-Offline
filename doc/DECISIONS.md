@@ -53,7 +53,7 @@
 | D-038 | 活动就绪动画使用可撤销 render demand | Accepted | Edge animation / lifecycle |
 | D-039 | 插件 API 采用向后兼容的 major.minor 演进 | Accepted | 插件 / 兼容性 |
 | D-041 | 普通窗口原生 Mica 与 layered 胶囊边界 | Superseded by D-042 | 主题 / Window integration |
-| D-042 | 原生云母使用单一窗口外框，验证最终桌面像素 | Accepted | 主题 / Window integration |
+| D-042 | 原生云母使用单一窗口外框，验证最终桌面像素 | Partially superseded by D-057（CI 截图） | 主题 / Window integration |
 | D-043 | 透色亚克力试用可调色 accent，保留单窗口边界 | Experimental | 主题 / Window integration |
 | D-044 | 自绘材质顶栏使用零物理 glass，清透皮肤分离 alpha recipe | Superseded by D-045 | 主题 / Window integration |
 | D-045 | 系统材质保留 full glass，清透接法的零边距不通用 | Partially superseded by D-046 | 主题 / Window integration |
@@ -64,6 +64,8 @@
 | D-053 | 材质绘制、原生背景与可选采样职责收敛 | Partially superseded by D-054 | 主题 / Rendering |
 | D-054 | 辅助材质背景改为一次性静态快照，拖动复用虚拟桌面纹理 | Accepted | 主题 / Rendering |
 | D-055 | Aero 不采用 ACCENT_ENABLE_BLURBEHIND 原生模糊 | Rejected | 主题 / Window integration |
+| D-056 | 精确终帧与主胶囊纯视觉输入隔离 | Accepted | Edge handoff / input |
+| D-057 | DWM 桌面截图退出 CI 自动验收 | Accepted | 测试 / Window integration |
 
 ## 维护规则
 
@@ -413,7 +415,7 @@ V2.5 的日志还证明了 transaction 粒度本身会成为性能和正确性�
 
 ### Decision
 
-脱离队列/跨边拖拽使用 `EdgeCapsuleDragWindow`，不复用 docked 单边 host。controller 序列化 capsule reorder，因此进程级只维护一个 pooled drag HWND；其 HWND 和 WPF tree 长期存在，lease 时只重新绑定 paper-specific presentation。
+脱离队列/跨边拖拽使用 `EdgeCapsuleDragWindow`，不复用 docked 单边 host。controller 序列化 capsule reorder，因此进程级只维护一个 pooled drag HWND；其 HWND 和 WPF tree 长期存在，lease 时只重新绑定当前拖动对象的 presentation。主胶囊横向整队迁移同样租用这一 pooled HWND，只复用 `FloatingFree` 视觉与 native drag；队列成员、monitor/edge、collapse 状态和起始高度仍由 controller 的 queue transfer 一次提交，master 不伪装成 Paper。
 
 ### Why
 
@@ -429,6 +431,7 @@ Docked capsule 有 wall-side straight edge、close segment、bounded capacity �
 
 - `cc9906ab940bc0e11905401fb079fdedc1f05427` — `fix(edge): keep one persistent drag host`。
 - 当前 `src/EdgeCapsuleDragWindow.cs`。
+- 当前 `src/MasterCapsuleQueueTransfer.cs` / `src/MasterCapsuleWindow.cs`。
 
 ---
 
@@ -469,7 +472,7 @@ Docked capsule 有 wall-side straight edge、close segment、bounded capacity �
 
 proxy animation 到逻辑终点后，最终 real/WPF presentation 必须先完成 endpoint flush/apply、必要的 WPF render turn、真实 bounds verify 和 authority swap 条件，再允许撤 compositor cover。
 
-completion timer 只能发起完成尝试，本身不是 WPF terminal frame 已就绪的证明；尝试失败时 cover 继续持有 authority，并在后续重试中重新走 endpoint 准备与验证。
+completion timer 只能发起完成尝试，本身不是 WPF terminal frame 已就绪的证明；尝试失败时 cover 继续持有 authority，并在后续重试中重新走 endpoint 准备与验证。D-056 补充精确终帧要求；不能用动画准入容差替代终态提交与 handoff 验证。
 
 ### Why
 
@@ -497,7 +500,7 @@ DComp 动画结束和 WPF 最后一帧真正进入 DWM 并非天然同一个调�
 
 ### Decision
 
-Hover、Preview 和 preview corridor 的物理命中，以当前用户实际看见/已应用 presentation 的 `InteractiveBounds` 为准。WPF/native enter/leave 只是触发重新采样的 signal。proxy 拥有可见像素时，也消费同一 sampled logical frame 的 `InteractiveBounds` 做输入路由。
+Hover、Preview 和 preview corridor 的物理命中，以当前用户实际看见/已应用 presentation 的 `InteractiveBounds` 为准。WPF/native enter/leave 只是触发重新采样的 signal。proxy 拥有可见像素时，也消费同一 sampled logical frame 的 `InteractiveBounds` 做输入路由。主胶囊收起／展开 proxy 不拥有 capsule 输入语义，因此其 output HWND 在 publication 前进入已验证的原生 passthrough 模式，而不是把整个透明 envelope 交给 hit-test 兜底；该模式按 host generation 单向锁存，interactive proxy 使用未进入 passthrough 的 output host。
 
 ### Why
 
@@ -1541,7 +1544,7 @@ PR #191 最初在现有透明 WPF 窗口上采样静态壁纸，生成类似云�
 
 ## D-042 — 原生云母使用单一窗口外框，验证最终桌面像素
 
-**Status:** Accepted
+**Status:** Partially superseded by D-057（仅 CI 桌面截图验收方式；单窗口与材质约束保留）
 
 ### Context
 
@@ -1566,7 +1569,7 @@ PR #191 最初在现有透明 WPF 窗口上采样静态壁纸，生成类似云�
 
 - `src/NativeMicaBackdrop.cs`、`src/DwmMicaApi.cs`、`src/PaperWindow.cs`。
 - `src/AppController.cs` 的显示动画终点，`src/AppController.Settings.cs` 的窗口集成。
-- `tests/PaperTodo.MicaChecks/Program.cs`、`VisualChecks.cs` 与 Release CI 的桌面/WPF 双通道捕获。
+- 历史上 `tests/PaperTodo.MicaChecks/Program.cs`、`VisualChecks.cs` 的桌面/WPF 双通道捕获；此项 CI 验证方式于 D-057 移除，历史结论不再代表当前 CI 能自动证明最终桌面像素。
 
 
 ## D-043 — 透色亚克力试用可调色 accent，保留单窗口边界
@@ -1628,7 +1631,7 @@ PR #191 最初在现有透明 WPF 窗口上采样静态壁纸，生成类似云�
 
 **Decision:** Windows 11 26100+ 设置 `DWMWA_REDIRECTIONBITMAP_ALPHA`，成功后才将系统材质的实际 glass margin 归零。API 不支持时保留 D-045 的 full glass，绝不恢复无 alpha 的零 glass 黑底路线。仅改变现有 adapter 的合成参数，不创建第二个内容 HWND、负 margin 或窗口 region。释放时清理自己启用的属性。
 
-**Evidence:** `NativeMicaBackdrop.Refresh`、`DwmMicaApi.SetRedirectionAlpha`；`NativeSurfaceChecks.CheckCaptionSentinel` 故意将原生 caption 设成紫红色并验证最终桌面顶栏像素不变，使用旧 full-glass 路径的紫红色正对照，并避免在取样前泵 UI 消息导致 marker 被刷新重置；另保留黑底／能力失败回退检查。微软 `DWMWINDOWATTRIBUTE` 文档明确 alpha 通道要求 premultiplied 内容、最低 build 26100。旧 OS 的顶栏视觉与真实 Windows 11 多屏效果不能借用 Server 的结果作已验收结论。
+**Evidence:** `NativeMicaBackdrop.Refresh`、`DwmMicaApi.SetRedirectionAlpha`；历史 `NativeSurfaceChecks.CheckCaptionSentinel` 用原生 caption 的紫红色正对照验证过此接法，但该 CI 桌面截图手段因不稳定在 D-057 中移除。能力失败／回退检查保留于材质行为用例。微软 `DWMWINDOWATTRIBUTE` 文档明确 alpha 通道要求 premultiplied 内容、最低 build 26100。旧 OS 的顶栏视觉与真实 Windows 11 多屏效果不能借用 Server 的结果作已验收结论。
 
 ---
 
@@ -1732,4 +1735,64 @@ PR #191 最初在现有透明 WPF 窗口上采样静态壁纸，生成类似云�
 - `c1e92b6413578971d4af690b435d215f907a9583` — 首次将 Aero 切到 AccentPolicy state 3。
 - `903d3a4ec2a34656b8e4b9954455c2203bd203e7` / `21e09d4b30c6f72347597dc6582725eb98d87bf5` — 隔离 redirection alpha 并做真实材质验证。
 - `b93efc3b369e231070198146a44468962427d5f0` — 撤回失败的 BlurBehind 产品实现。
-- `tests/PaperTodo.MicaChecks/MaterialStudyChecks.cs` — 真实后景像素对照边界。
+- 历史 `tests/PaperTodo.MicaChecks/MaterialStudyChecks.cs` 的真实后景像素对照已按 D-057 退出 CI；不可靠的自动截图不能替代此历史实验结论或 Windows 11 真机验收。
+
+---
+
+## D-056 — 精确终帧与主胶囊纯视觉输入隔离（2026-10-07）
+
+**Status:** Accepted
+
+### Context / Evidence
+
+PR #319 的初版把主胶囊完整材质收展后的卡死解释为终点迟到，并叠加两阶段 settle recovery 与强制 cover-loss。重新审查并等待真实队列事务提交后，Windows 日志记录到 applied opacity 为 `0.9994429137551172`，而 endpoint 为 `1`；几何一致，但严格 frame equality 持续拒绝 handoff。
+
+`ResolveSettledFrame` 把动画准入使用的近似相等误用为终态，反复 Flush／ForceApply 仍保留该尾差。Windows A/B（PR #319，run `37529373611`）中，原版精确终帧测试失败；提交 canonical target 的同一测试在左右边缘 × 四档 DPI 下通过。实际完整材质收展对照中，修正后六次 proxy 启动均正常交接，没有 retry-exhausted／emergency-release。
+
+### Decision
+
+- timeline 结束或取消后，Presenter 提交 `TargetPresentation.ToFrame()`。近似比较只用于决定是否需要动画；handoff 保持精确一致性验证。
+- 撤掉此次 PR 尚未合并的 stage-local settle recovery 和 synthetic cover-loss。它们未解决终帧尾差，还会把局部失败扩大为共享 compositor runtime 失效；保留既有真实设备／output 丢失恢复路径。
+- 主胶囊收展 output 仍是纯视觉层：首次 publication 前进入 layered + transparent passthrough，完成后退休该 host；interactive proxy 使用未切入该模式的 host。同 HWND 反向切换不作为已验证能力。
+- 输入测试同时检查真实 live DComp 像素与跨线程原生点击，不能把“不可见窗口让点击通过”当作有效视觉代理。生命周期测试必须等待已排队事务执行，并验证 applied/native 终态、capture/affinity 释放与恢复后真实点击；空代理字典不能替代“曾经成功接管”。
+
+### Boundaries
+
+此次审查确认的是精确终帧缺陷及原生 passthrough 行为，不声称复现了用户每一种显卡／显示器时序，也不声称任意持续 Win32 失败都能自动恢复。#227 新增材质采样与 #318 的采样隔离是另一条生命周期边界；不能仅按 PR 出现顺序证明所有卡死均由材质采样触发。
+
+### Code
+
+- `src/EdgeCapsulePresenter.cs` / `src/EdgeCapsuleTransitionPolicy.cs`
+- `src/EdgeCapsuleQueueCompositionProxy.Runtime.cs` / `src/EdgeCapsuleQueueProxyWindow.cs`
+- `tests/PaperTodo.EdgeTitleChecks/TerminalHandoffFrameChecks.cs` / `ProxyVisualEvidence.cs`
+- `tests/PaperTodo.LifecycleChecks/MasterMaterialHandoffChecks.cs`
+
+---
+
+## D-057 — DWM 桌面截图退出 CI 自动验收（2026-10-12）
+
+**Status:** Accepted
+
+### Context / Evidence
+
+`NativeSurfaceChecks.WaitForDesktopInk` 曾在 GitHub 托管 Windows 环境中要求真实纸片置顶图标的绿色像素连续两次出现在 `CopyFromScreen`；即使进程内 WPF 画面、HWND、窗口层级与原生材质属性均正常，也可能在 12 轮 × 200ms 后检测到零像素，从而把当前 PR 误判为失败。它没有提供确定性的 DWM 最终提交屏障。
+
+历史 #227 的 [同机基线与候选对照](https://github.com/snownico0722/PaperTodo/actions/runs/35690637855) 已确认未修改的基线也失败；[ABBA 补绘实验](https://github.com/snownico0722/PaperTodo/actions/runs/35692739417) 中补绘方案 7/24、原方案 6/24 轮失败，证明增加 `ContentRendered` 补绘不能消除故障。PR #341 的 [运行 38213083862](https://github.com/snownico0722/PaperTodo/actions/runs/38213083862) 首轮在 Clear Acrylic 失去桌面像素而失败、完全相同的 SHA 重跑通过，进一步确认它不是当前业务改动的可靠回归信号。
+
+### Decision / Why
+
+- 从自动化 `MicaChecks` 中**删除** `NativeSurfaceChecks`、`VisualChecks` 的最终 DWM 桌面截图检查及对应辅助代码，不再通过 `PAPER_MICA_CAPTURE` / `PAPER_SKIN_CAPTURE` 触发桌面采样、上传数百张伪证据或延长重试。Aero 的素材采样试验同样移除实际 `CopyFromScreen`，保留快速的 WPF 控件级反光平移和材质 relief 检查。
+- 保留可稳定判断的原生材质属性／失败回退、同一 HWND 与编辑器生命周期、激活层级、胶囊变化、内存中的 WPF 离屏像素、订阅释放、背景采样生命周期等现有用例，继续纳入同一 Release CI。MicaChecks 单步设置两分钟硬超时；正常目标显著短于上限。
+- **不会**把上述检查的通过描述成真实桌面最终效果正确。Windows 11／多屏 DPI／HDR 的材质显示与体验仍需按涉及材质更改的发布场景进行人工验收，这也不意味着要保留一套长期依赖截图稳定性的 CI 脚手架。
+
+### Rejected / Do not reintroduce
+
+- 不把红灯归因于某台共享 CI 机器并改到另一台机器继续跑相同的 DWM 桌面截图用例。
+- 不通过扩大 `WaitForDesktopInk` 等待次数、插入固定 `Sleep`、一遍遍重试或人工判定全白像素为“通过”继续维护该测试。
+- 不把 `RenderTargetBitmap` 的成功冒充最终 DWM 桌面像素正确，也不把截图测试改名成可选 CI 的长期并行系统。
+
+### Current code
+
+- `.github/workflows/pull-request-build.yml`：仍执行材质行为检查，但不再输出桌面截图 artifact。
+- `tests/PaperTodo.MicaChecks/Program.cs` 与 `MaterialStudyChecks.cs`：保留确定性渲染与运行时检查；历史屏幕采样源文件删除。
+- `doc/experiments/pr227-drag-followup-20260922.md`：基线、故障证据与失败补绘实验。
