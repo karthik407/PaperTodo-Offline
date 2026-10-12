@@ -257,25 +257,6 @@ public sealed partial class PaperWindow
                 }
             }
 
-            if (descriptor.Kind == PaperBodyPluginKind.Web && descriptor.Manifest != null)
-            {
-                var stored = ReadPluginState(descriptor.Id);
-                if (stored.Version > descriptor.StateVersion)
-                {
-                    throw new InvalidOperationException(
-                        $"Saved plugin state version {stored.Version} is newer than supported version {descriptor.StateVersion}.");
-                }
-                var context = CreatePluginContext(descriptor, generation, stored);
-                var runtimeOwnsPresentation =
-                    descriptor.Manifest.Capabilities.Contains(
-                        "runtime",
-                        StringComparer.Ordinal);
-                return new WebPaperBodySession(
-                    context,
-                    descriptor.Manifest,
-                    runtimeOwnsPresentation);
-            }
-
             throw new InvalidOperationException("Plugin descriptor has no usable body factory.");
         }
         catch (Exception ex)

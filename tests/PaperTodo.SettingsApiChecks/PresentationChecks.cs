@@ -171,31 +171,6 @@ internal static partial class Program
         await Task.Run(() => runtimeApi.ShowPaper("note", activate: false));
         Check(note.IsVisible, "Runtime can reopen a paper without a body callback.");
 
-        object? Web(string method, object parameters) => WebPluginWorkspaceRequests.Execute(host, method, Json(parameters));
-        Web("papers.hide", new { paperId = "note" });
-        Web("papers.show", new { paperId = "note", activate = false });
-        Web("papers.collapse", new { paperId = "note" });
-        Web("papers.expand", new { paperId = "note", activate = false });
-        Web("papers.toggle", new { paperId = "note", activate = false });
-        Web("papers.toggleCollapsed", new { paperId = "note", activate = false });
-        Web("papers.activate", new { paperId = "note" });
-        Check(note.IsVisible && note.IsCollapsed, "All seven Web Workspace methods route through the real host.");
-        Throws<PaperTodoPluginException>(() => Web("papers.show", new { paperId = "note", activate = "false" }), "invalid_params");
-        Throws<PaperTodoPluginException>(() => Web("papers.hide", new { }), "invalid_params");
-
-        // Test the actual Body dispatcher separately: it has its own switch in addition to the
-        // common Workspace router used by Mini and Runtime. No live WebView is claimed here.
-        var bodyContext = (PaperBodyContext)RuntimeHelpers.GetUninitializedObject(typeof(PaperBodyContext));
-        Field(bodyContext, "<Workspace>k__BackingField", host);
-        var body = (WebPaperBodySession)RuntimeHelpers.GetUninitializedObject(typeof(WebPaperBodySession));
-        Field(body, "_context", bodyContext);
-        var bodyMethod = typeof(WebPaperBodySession).GetMethod("ExecuteHostRequest", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        foreach (var method in new[] { "papers.show", "papers.hide", "papers.toggle", "papers.expand", "papers.collapse", "papers.toggleCollapsed", "papers.activate" })
-        {
-            var value = bodyMethod.Invoke(body, [method, Json(new { paperId = "note", activate = false })]);
-            Check(value is PaperPresentationResult, "Body dispatcher: " + method);
-        }
-
         c.State.McpEnabled = true;
         var mcp = new McpCommandService(c, commands);
         object? Mcp(string method, object parameters) => mcp.Execute(Json(new { method, @params = parameters }));

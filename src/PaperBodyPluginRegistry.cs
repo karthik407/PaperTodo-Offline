@@ -15,8 +15,7 @@ internal static class PaperBodyProviderIds
 internal enum PaperBodyPluginKind
 {
     BuiltIn,
-    Native,
-    Web
+    Native
 }
 
 internal sealed record PaperBodyPluginDescriptor(
@@ -45,7 +44,7 @@ internal sealed record PaperBodyNativePluginActivation(
 
 internal sealed class PaperBodyPluginManifest
 {
-    public string Kind { get; set; } = "web";
+    public string Kind { get; set; } = "native";
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
@@ -54,11 +53,7 @@ internal sealed class PaperBodyPluginManifest
     public int StateVersion { get; set; } = 1;
     public int MaxPaperInstances { get; set; } = 1;
     public string[] Permissions { get; set; } = [];
-    public string Entry { get; set; } = "index.html";
-    public string MiniEntry { get; set; } = "";
-    public string Runtime { get; set; } = "";
-    public PaperBodyPluginMiniSizeManifest? MiniSize { get; set; }
-    public PaperBodyPluginMiniSizeManifest? MiniMaxSize { get; set; }
+    public string Entry { get; set; } = "";
     public string[] Capabilities { get; set; } = [];
     public bool AdvancedSettings { get; set; }
     public int? PrimarySettings { get; set; }
@@ -70,14 +65,6 @@ internal sealed class PaperBodyPluginManifest
 
     public string DirectoryPath { get; internal set; } = "";
     public string EntryPath { get; internal set; } = "";
-    public string MiniEntryPath { get; internal set; } = "";
-    public string RuntimePath { get; internal set; } = "";
-}
-
-internal sealed class PaperBodyPluginMiniSizeManifest
-{
-    public double Width { get; set; } = 320;
-    public double Height { get; set; } = 220;
 }
 
 /// <summary>
@@ -206,12 +193,7 @@ internal sealed partial class PaperBodyPluginRegistry : IDisposable
             try
             {
                 var manifest = ReadManifest(manifestPath, directory);
-                var descriptor = NormalizeKind(manifest.Kind) switch
-                {
-                    PaperBodyPluginKind.Web => LoadWebDescriptor(manifest, manifestPath),
-                    PaperBodyPluginKind.Native => LoadNativeDescriptor(manifest, manifestPath),
-                    _ => throw new InvalidDataException("Built-in plugins cannot be loaded from disk.")
-                };
+                var descriptor = LoadNativeDescriptor(manifest, manifestPath);
                 AddDescriptor(_descriptors, descriptor);
             }
             catch (Exception ex)
@@ -270,104 +252,7 @@ internal sealed partial class PaperBodyPluginRegistry : IDisposable
             throw new FileNotFoundException("Plugin entry was not found.", manifest.EntryPath);
         }
 
-        var webRoot = kind == PaperBodyPluginKind.Web
-            ? Path.GetDirectoryName(manifest.EntryPath)
-              ?? throw new InvalidDataException("Web plugin entry has no containing directory.")
-            : null;
-
-        if (!string.IsNullOrWhiteSpace(manifest.MiniEntry))
-        {
-            if (kind != PaperBodyPluginKind.Web)
-            {
-                throw new InvalidDataException(
-                    "miniEntry is only valid for Web plugins.");
-            }
-
-            manifest.MiniEntryPath = ResolveContainedPath(
-                directory,
-                manifest.MiniEntry);
-            if (!File.Exists(manifest.MiniEntryPath))
-            {
-                throw new FileNotFoundException(
-                    "Plugin mini entry was not found.",
-                    manifest.MiniEntryPath);
-            }
-            EnsurePathInsideDirectory(
-                webRoot!,
-                manifest.MiniEntryPath,
-                "miniEntry");
-
-            if (manifest.MiniSize is { } miniSize)
-            {
-                ValidateMiniSize(miniSize, "miniSize");
-            }
-        }
-        else if (manifest.MiniSize != null)
-        {
-            throw new InvalidDataException(
-                "miniSize requires a Web miniEntry.");
-        }
-
-        if (manifest.MiniMaxSize is { } miniMaximum)
-        {
-            if (kind == PaperBodyPluginKind.Web &&
-                string.IsNullOrWhiteSpace(manifest.MiniEntry))
-            {
-                throw new InvalidDataException(
-                    "miniMaxSize requires a Web miniEntry for Web plugins.");
-            }
-            ValidateMiniSize(miniMaximum, "miniMaxSize");
-            if (manifest.MiniSize is { } preferred &&
-                (preferred.Width > miniMaximum.Width || preferred.Height > miniMaximum.Height))
-            {
-                throw new InvalidDataException(
-                    "miniSize cannot exceed the declared miniMaxSize.");
-            }
-        }
-
-        var hasPluginRuntime = manifest.Capabilities.Contains(
-            "runtime",
-            StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(manifest.Runtime) &&
-            kind != PaperBodyPluginKind.Web)
-        {
-            throw new InvalidDataException(
-                "runtime is only valid for Web plugins.");
-        }
-        if (!string.IsNullOrWhiteSpace(manifest.Runtime) && !hasPluginRuntime)
-        {
-            throw new InvalidDataException(
-                "runtime requires the runtime capability.");
-        }
-        if (kind == PaperBodyPluginKind.Web && hasPluginRuntime)
-        {
-            manifest.RuntimePath = string.IsNullOrWhiteSpace(manifest.Runtime)
-                ? Path.Combine(webRoot!, "runtime.html")
-                : ResolveContainedPath(directory, manifest.Runtime);
-            EnsurePathInsideDirectory(webRoot!, manifest.RuntimePath, "runtime");
-            if (!File.Exists(manifest.RuntimePath))
-            {
-                throw new FileNotFoundException(
-                    "Plugin runtime entry was not found.",
-                    manifest.RuntimePath);
-            }
-        }
-
         return manifest;
-    }
-
-    private static void ValidateMiniSize(
-        PaperBodyPluginMiniSizeManifest size,
-        string fieldName)
-    {
-        if (!double.IsFinite(size.Width) ||
-            !double.IsFinite(size.Height) ||
-            size.Width <= 0 ||
-            size.Height <= 0)
-        {
-            throw new InvalidDataException(
-                $"{fieldName} width and height must be positive finite numbers.");
-        }
     }
 
     private static void EnsurePathInsideDirectory(
@@ -392,35 +277,9 @@ internal sealed partial class PaperBodyPluginRegistry : IDisposable
     private static PaperBodyPluginKind NormalizeKind(string? kind) =>
         kind?.Trim().ToLowerInvariant() switch
         {
-            "web" => PaperBodyPluginKind.Web,
             "native" => PaperBodyPluginKind.Native,
-            _ => throw new InvalidDataException("plugin kind must be 'web' or 'native'.")
+            _ => throw new InvalidDataException("plugin kind must be 'native'.")
         };
-
-    private PaperBodyPluginDescriptor LoadWebDescriptor(
-        PaperBodyPluginManifest manifest,
-        string manifestPath)
-    {
-        var fingerprint = DiscoveryFingerprint(
-            manifestPath,
-            manifest.EntryPath,
-            manifest.MiniEntryPath,
-            manifest.RuntimePath);
-        return new PaperBodyPluginDescriptor(
-            manifest.Id.Trim(),
-            string.IsNullOrWhiteSpace(manifest.Name) ? manifest.Id.Trim() : manifest.Name.Trim(),
-            manifest.Description?.Trim() ?? "",
-            ParseVersion(manifest.Version),
-            manifest.ApiVersion,
-            manifest.StateVersion,
-            PaperBodyPluginKind.Web,
-            ParseCapabilities(manifest.Capabilities),
-            ParsePermissions(manifest.Permissions),
-            manifest.DirectoryPath,
-            manifestPath,
-            fingerprint,
-            Manifest: manifest);
-    }
 
     private PaperBodyPluginDescriptor LoadNativeDescriptor(
         PaperBodyPluginManifest manifest,
@@ -630,25 +489,12 @@ internal sealed partial class PaperBodyPluginRegistry : IDisposable
 
     private static string DiscoveryFingerprint(
         string manifestPath,
-        string entryPath,
-        string? miniEntryPath = null,
-        string? runtimePath = null)
+        string entryPath)
     {
         var manifest = new FileInfo(manifestPath);
         var entry = new FileInfo(entryPath);
-        var value = $"discovery:{manifest.Length}:{manifest.LastWriteTimeUtc.Ticks}:" +
+        return $"discovery:{manifest.Length}:{manifest.LastWriteTimeUtc.Ticks}:" +
             $"{entry.Length}:{entry.LastWriteTimeUtc.Ticks}";
-        if (!string.IsNullOrWhiteSpace(miniEntryPath))
-        {
-            var mini = new FileInfo(miniEntryPath);
-            value += $":{mini.Length}:{mini.LastWriteTimeUtc.Ticks}";
-        }
-        if (!string.IsNullOrWhiteSpace(runtimePath))
-        {
-            var runtime = new FileInfo(runtimePath);
-            value += $":{runtime.Length}:{runtime.LastWriteTimeUtc.Ticks}";
-        }
-        return value;
     }
 
     public void Dispose()
@@ -681,10 +527,7 @@ internal sealed partial class PaperBodyPluginRegistry : IDisposable
         {
             AbstractionsAssemblyName,
             "WinRT.Runtime",
-            "Microsoft.Windows.SDK.NET",
-            "Microsoft.Web.WebView2.Core",
-            "Microsoft.Web.WebView2.Wpf",
-            "Microsoft.Web.WebView2.WinForms"
+            "Microsoft.Windows.SDK.NET"
         };
 
         private readonly AssemblyDependencyResolver _resolver;

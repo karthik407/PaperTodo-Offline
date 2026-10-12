@@ -29,13 +29,6 @@ public sealed partial class PaperWindow
         {
             return new EdgeCapsulePreviewSize(440, 280);
         }
-        if (descriptor.Kind == PaperBodyPluginKind.Web &&
-            string.IsNullOrWhiteSpace(descriptor.Manifest?.MiniEntry))
-        {
-            return new EdgeCapsulePreviewSize(
-                PluginFallbackMiniMaximumWidth,
-                PluginFallbackMiniHeight);
-        }
 
         EnsurePluginMiniMaximumSession(descriptor);
 
@@ -46,16 +39,6 @@ public sealed partial class PaperWindow
         if (_pluginMiniEffectiveMaximumLocked)
         {
             return _pluginMiniEffectiveMaximum;
-        }
-        if (descriptor.Kind == PaperBodyPluginKind.Web &&
-            descriptor.Manifest is { } manifest &&
-            !string.IsNullOrWhiteSpace(manifest.MiniEntry))
-        {
-            return LockPluginMiniMaximum(
-                new EdgeCapsulePreviewSize(
-                    manifest.MiniSize?.Width ?? 320,
-                    manifest.MiniSize?.Height ?? 220),
-                descriptor);
         }
 
         // Native PreferredMiniViewSize is not invoked from queue placement. Until the first real
@@ -155,14 +138,8 @@ public sealed partial class PaperWindow
     private static EdgeCapsulePreviewSize? ReadDeclaredPluginMiniMaximum(
         PaperBodyPluginDescriptor descriptor)
     {
-        if (descriptor.Manifest?.MiniMaxSize is not { } maximum)
-        {
-            return null;
-        }
-
-        // Registry discovery already validates the protocol version and finite positive values.
-        // Capacity planning consumes the canonical parsed manifest instead of re-reading plugin.json.
-        return new EdgeCapsulePreviewSize(maximum.Width, maximum.Height);
+        // Native plugins do not declare miniMaxSize in manifest
+        return null;
     }
 
     private static EdgeCapsulePreviewSize DefaultPluginMiniMaximum() =>
