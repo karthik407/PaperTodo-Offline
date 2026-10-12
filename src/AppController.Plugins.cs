@@ -1291,7 +1291,6 @@ public sealed partial class AppController
     private static string PluginKindText(PaperBodyPluginKind kind) => kind switch
     {
         PaperBodyPluginKind.Native => Strings.Get("PluginsNative"),
-        PaperBodyPluginKind.Web => Strings.Get("PluginsWeb"),
         _ => Strings.Get("PluginsBuiltIn")
     };
 

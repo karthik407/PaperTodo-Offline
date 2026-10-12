@@ -12,7 +12,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using Microsoft.Web.WebView2.Core;
 using PaperTodo;
 using PaperTodo.Plugin;
 
@@ -35,11 +34,7 @@ internal static partial class Program
             ("popup-factory-close-replacement-and-disposal", PopupLifetime),
             ("popup-worker-dispatch-and-session-cleanup", PopupFacade),
             ("one-shot-screen-placement-and-size-validation", Placement),
-            ("existing-topbar-constructor-compatible", TopBarCompatibility),
-            ("web-entry-containment-and-message-limits", WebEntry),
-            ("web-document-rejects-stale-menu-popup-requests", WebDocument),
-            ("shared-web-process-recovery-classification", ProcessFailures),
-            ("popup-js-bridge-read-only-images-and-messages", WebBridge)
+            ("existing-topbar-constructor-compatible", TopBarCompatibility)
         };
         var failed = 0;
         foreach (var (name, run) in checks)
@@ -298,66 +293,6 @@ internal static partial class Program
         var (id, scope, paper, type, provider) = old;
         Assert(id == "a" && paper == "p" && old.Position == null, "Old invocation contract changed.");
         Assert((old with { Position = new(1, 2) }).Position == new PaperPopupPosition(1, 2), "New position not carried.");
-    }
-
-    private static void WebEntry()
-    {
-        using var temp = new Temp();
-        var root = Path.Combine(temp.Path, "web"); Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "panel.html"), "<p>test</p>");
-        File.WriteAllText(Path.Combine(temp.Path, "outside.html"), "<p>outside</p>");
-        Assert(WebPluginPopupRequests.ResolveEntry(root, "panel.html") == Path.Combine(root, "panel.html"), "Local HTML rejected.");
-        foreach (var bad in new[] { "../outside.html", "https://example.com/", "missing.html", "panel.html?x=1" })
-            Error("invalid_popup_entry", () => WebPluginPopupRequests.ResolveEntry(root, bad));
-        WebPluginPopupRequests.ValidateMessage(JsonSerializer.SerializeToElement(new { paperId = "p" }));
-        Error("popup_message_too_large", () => WebPluginPopupRequests.ValidateMessage(JsonSerializer.SerializeToElement(new string('x', 65536))));
-    }
-
-    private static void WebDocument()
-    {
-        foreach (var method in new[] { "paperActions.set", "popups.open", "popups.close" })
-        {
-            var payload = JsonSerializer.SerializeToElement(new { method });
-            Assert(!WebPluginRuntime.AcceptsExtensionRequest(JsonSerializer.SerializeToElement(new { uiToken = "old" }), payload, "new"), "Stale document accepted.");
-            Assert(!WebPluginRuntime.AcceptsExtensionRequest(JsonSerializer.SerializeToElement(new { uiToken = "new" }), payload, null), "Navigation retained UI authority.");
-            Assert(WebPluginRuntime.AcceptsExtensionRequest(JsonSerializer.SerializeToElement(new { uiToken = "new" }), payload, "new"), "Current document rejected.");
-        }
-    }
-
-    private static void ProcessFailures()
-    {
-        foreach (var kind in new[] { CoreWebView2ProcessFailedKind.GpuProcessExited, CoreWebView2ProcessFailedKind.UtilityProcessExited,
-            CoreWebView2ProcessFailedKind.FrameRenderProcessExited })
-        {
-            Assert(WebPluginProcessFailurePolicy.Classify(kind) == WebPluginProcessFailurePolicy.Recovery.None,
-                $"Recoverable process failure closes popup: {kind}");
-            Assert(!WebPaperBodySession.ShouldResetExtensionUiOnProcessFailure(kind),
-                $"Recoverable body process failure resets popup ownership: {kind}");
-        }
-        Assert(WebPluginProcessFailurePolicy.Classify(CoreWebView2ProcessFailedKind.BrowserProcessExited) == WebPluginProcessFailurePolicy.Recovery.Restart,
-            "Browser failure not classified.");
-        Assert(WebPluginProcessFailurePolicy.Classify(CoreWebView2ProcessFailedKind.RenderProcessExited) == WebPluginProcessFailurePolicy.Recovery.Reload,
-            "Renderer failure not classified.");
-        Assert(!WebPluginRuntime.CanRecoverRendererByReload(startupCompleted: false),
-            "A renderer failure during first startup must not trigger internal reload recovery.");
-        Assert(WebPluginRuntime.CanRecoverRendererByReload(startupCompleted: true),
-            "A renderer failure after successful startup must retain bounded reload recovery.");
-        Assert(WebPaperBodySession.ShouldResetExtensionUiOnProcessFailure(CoreWebView2ProcessFailedKind.BrowserProcessExited) &&
-            WebPaperBodySession.ShouldResetExtensionUiOnProcessFailure(CoreWebView2ProcessFailedKind.RenderProcessExited),
-            "Fatal body process failure stopped resetting popup ownership.");
-    }
-
-    private static void WebBridge()
-    {
-        using var temp = new Temp();
-        var bridge = Path.Combine(temp.Path, "bridge.js");
-        File.WriteAllText(bridge, WebPluginPopupContent.BridgeScript("https://popup.test"), new UTF8Encoding(false));
-        var start = new ProcessStartInfo("node") { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
-        start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "bridge-check.cjs")); start.ArgumentList.Add(bridge);
-        using var process = Process.Start(start)!;
-        var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(15_000)) { process.Kill(true); throw new TimeoutException("Node bridge check timed out."); }
-        Assert(process.ExitCode == 0, stderr.GetAwaiter().GetResult());
     }
 
     private static PaperBodyPluginHostApi BodyApi(AppController controller, string[] permissions) =>

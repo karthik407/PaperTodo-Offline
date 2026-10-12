@@ -242,7 +242,7 @@ public sealed record PaperMiniViewContext(
 /// <summary>
 /// Optional native-session capability for a dedicated edge-browsing surface. The session and mini
 /// view may share one business-state model, but CreateMiniView must return a fresh pure-WPF tree.
-/// Window, HwndHost, WindowsFormsHost, WebView2 and already-parented controls are rejected.
+/// Window, HwndHost, WindowsFormsHost and already-parented controls are rejected.
 /// PaperTodo caches one successful view per live session and normalized geometry. Returning null or
 /// throwing falls back to the enlarged capsule presentation.
 /// </summary>
@@ -390,8 +390,7 @@ public interface IPaperBodyPlugin
 }
 
 /// <summary>
-/// One live body instance attached to one PaperTodo paper. Web plugins must call
-/// papertodo.saveState after every state mutation; Commit is best-effort only.
+/// One live body instance attached to one PaperTodo paper. Commit is best-effort only.
 /// </summary>
 public interface IPaperBodySession : IDisposable
 {

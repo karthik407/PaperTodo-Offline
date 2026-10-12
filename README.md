@@ -8,16 +8,17 @@ The goal of this fork is to provide a **simple, local-only Windows sticky-note a
 
 This fork removes functionality that is not required for local sticky notes, including:
 
-- **No cloud synchronization**
-- **No telemetry or analytics**
-- **No PowerShell/script execution**
-- **No plugin system**
-- **No WebView2-based plugins**
+- **No telemetry or analytics** [Done]
+- **No PowerShell/script execution** [Done]
+- **No WebView2-based web plugins** [Done]
 - **No MCP integration**
-- **No account or sign-in functionality**
 - **No network-dependent features**
 
 The core sticky-note functionality remains, including local note storage and the features retained from PaperTodo.
+
+## Command for publishing
+
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 
 ### Local-Only Design
 

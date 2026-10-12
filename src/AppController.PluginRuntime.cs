@@ -382,22 +382,6 @@ public sealed partial class AppController
                 }) ?? throw new InvalidOperationException(
                     $"Native plugin '{descriptor.Id}' returned no plugin runtime.");
             }
-            else if (descriptor.Kind == PaperBodyPluginKind.Web)
-            {
-                var webRuntime = new WebPluginRuntime(
-                    descriptor,
-                    workspace,
-                    settings,
-                    state,
-                    papers,
-                    globalTopBar,
-                    globalShortcuts,
-                    IsActive,
-                    () => RequestPluginRuntimeRestart(runtimeId, descriptor.Id));
-                runtime = webRuntime;
-                slot.StartingRuntime = webRuntime;
-                await webRuntime.StartAsync();
-            }
             else
             {
                 throw new InvalidOperationException(
