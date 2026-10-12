@@ -559,9 +559,6 @@ public sealed partial class PaperWindow
         var hasLinkedPath = !string.IsNullOrWhiteSpace(item.LinkedPath);
         var hasLinkedPaper = _controller.State.EnableTodoPaperLinks &&
             _controller.TryGetLinkedPaperTitle(item.LinkedPaperId, out linkedPaperTitle);
-        /*var runLinkedScriptOnClick = hasLinkedPaper &&
-            _controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId);*/
-        var runLinkedScriptOnClick = false;
         var todoRemindersEnabled =
             _controller.State.ExperimentalTodoReminders;
         var showTodoReminderButton = todoRemindersEnabled &&
@@ -809,9 +806,7 @@ public sealed partial class PaperWindow
             itemMenu.Items.Add(MenuHeader(Strings.Get("MenuTodoItem")));
             if (hasLinkedPaper)
             {
-                var openMenuText = runLinkedScriptOnClick
-                    ? Strings.Format("MenuEditLinkedScriptCapsule", linkedPaperTitle)
-                    : Strings.Format("MenuOpenLinkedPaper", linkedPaperTitle);
+                var openMenuText = Strings.Format("MenuOpenLinkedPaper", linkedPaperTitle);
                 itemMenu.Items.Add(MenuItem(openMenuText, (_, _) => _controller.OpenLinkedPaper(item.LinkedPaperId, this)));
                 itemMenu.Items.Add(MenuItem(Strings.Get("MenuUnlinkPaper"), (_, _) => UnlinkPaperFromTodoItem(item)));
                 itemMenu.Items.Add(MenuSeparator());
@@ -917,21 +912,21 @@ public sealed partial class PaperWindow
                     : isTodoMultiline
                         ? CompactLinkedPaperTitle(linkedPaperTitle, 6, 5)
                         : CompactLinkedPaperTitle(linkedPaperTitle, 3, 3);
-                return runLinkedScriptOnClick ? "⚡ " + title : title;
+                return title;
             }
 
             double LegacyLinkedPaperButtonWidth(bool isTodoMultiline)
             {
                 return isTodoMultiline
-                    ? Math.Max(runLinkedScriptOnClick ? 52 : 44, metrics.CheckColumnWidth * (runLinkedScriptOnClick ? 2.35 : 2))
-                    : Math.Max(runLinkedScriptOnClick ? 58 : 50, metrics.CheckColumnWidth * (runLinkedScriptOnClick ? 2.55 : 2.2));
+                    ? Math.Max(44, metrics.CheckColumnWidth * (2))
+                    : Math.Max(50, metrics.CheckColumnWidth * (2.2));
             }
 
             double LegacyLinkedPaperTextMaxWidth(bool isTodoMultiline)
             {
                 return metrics.CheckColumnWidth * (isTodoMultiline
-                    ? runLinkedScriptOnClick ? 2.15 : 1.8
-                    : runLinkedScriptOnClick ? 2.35 : 2);
+                    ? 1.8
+                    : 2);
             }
 
             double LinkedPaperButtonWidth(bool isTodoMultiline, string label)
@@ -963,7 +958,7 @@ public sealed partial class PaperWindow
 
             var linkedPaperButtonText = showLinkedPaperName
                 ? LinkedPaperButtonLabel(isTodoMultiline: false)
-                : runLinkedScriptOnClick ? "⚡" : "\uE71B";
+                : "\uE71B";
             var multilineLinkedPaperButtonText = showLinkedPaperName
                 ? LinkedPaperButtonLabel(isTodoMultiline: true)
                 : linkedPaperButtonText;
@@ -979,10 +974,10 @@ public sealed partial class PaperWindow
                 Opacity = linkedPaperActive ? 1.0 : 0.72,
                 FontFamily = showLinkedPaperName
                     ? AppTypography.UiFontFamily
-                    : runLinkedScriptOnClick ? new FontFamily("Segoe UI Symbol") : new FontFamily("Segoe MDL2 Assets"),
+                    : new FontFamily("Segoe MDL2 Assets"),
                 FontSize = showLinkedPaperName
                     ? metrics.LinkedPaperNameFontSize
-                    : runLinkedScriptOnClick ? metrics.LinkedPaperIconFontSize + 1 : metrics.LinkedPaperIconFontSize,
+                    : metrics.LinkedPaperIconFontSize,
                 FontWeight = FontWeights.SemiBold,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1004,9 +999,7 @@ public sealed partial class PaperWindow
                 CornerRadius = new CornerRadius(Theme.IsPixelSkin ? 0 : RadiusControl),
                 Background = linkedPaperActive ? LinkedPaperLightBgBrush : LinkedPaperNormalBgBrush,
                 Cursor = Cursors.Hand,
-                ToolTip = runLinkedScriptOnClick
-                    ? Strings.Format("ToolTipRunLinkedScriptCapsule", linkedPaperTitle)
-                    : Strings.Format("ToolTipOpenLinkedPaper", linkedPaperTitle),
+                ToolTip = Strings.Format("ToolTipOpenLinkedPaper", linkedPaperTitle),
                 Child = linkGlyph
             };
 
@@ -1076,16 +1069,11 @@ public sealed partial class PaperWindow
                     ? LinkedPaperActiveTextBrush : hovered ? TextBrush : WeakTextBrush;
                 linkGlyph.Opacity = linkedPaperActive || hovered ? 1.0 : 0.72;
 
-                var runScript = _controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId);
-                if (linkedPaperTitle == refreshedTitle && runLinkedScriptOnClick == runScript)
-                {
-                    return;
-                }
+
                 linkedPaperTitle = refreshedTitle;
-                runLinkedScriptOnClick = runScript;
                 linkedPaperButtonText = showLinkedPaperName
                     ? LinkedPaperButtonLabel(isTodoMultiline: false)
-                    : runLinkedScriptOnClick ? "⚡" : "\uE71B";
+                    : "\uE71B";
                 multilineLinkedPaperButtonText = showLinkedPaperName
                     ? LinkedPaperButtonLabel(isTodoMultiline: true)
                     : linkedPaperButtonText;
@@ -1095,16 +1083,12 @@ public sealed partial class PaperWindow
                         LinkedPaperButtonWidth(true, multilineLinkedPaperButtonText))
                     : Math.Max(23, metrics.CheckColumnWidth);
                 linkButton.Width = linkedPaperButtonWidth;
-                linkButton.ToolTip = runLinkedScriptOnClick
-                    ? Strings.Format("ToolTipRunLinkedScriptCapsule", linkedPaperTitle)
-                    : Strings.Format("ToolTipOpenLinkedPaper", linkedPaperTitle);
+                linkButton.ToolTip = Strings.Format("ToolTipOpenLinkedPaper", linkedPaperTitle);
                 if (!showLinkedPaperName)
                 {
                     linkGlyph.Text = linkedPaperButtonText;
-                    linkGlyph.FontFamily = new FontFamily(runLinkedScriptOnClick
-                        ? "Segoe UI Symbol" : "Segoe MDL2 Assets");
-                    linkGlyph.FontSize = runLinkedScriptOnClick
-                        ? metrics.LinkedPaperIconFontSize + 1 : metrics.LinkedPaperIconFontSize;
+                    linkGlyph.FontFamily = new FontFamily("Segoe MDL2 Assets");
+                    linkGlyph.FontSize = metrics.LinkedPaperIconFontSize;
                 }
                 lastLinkedPaperNameMultiline = null;
                 UpdateLinkedPaperNameLayout();
