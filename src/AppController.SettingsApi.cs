@@ -13,12 +13,12 @@ public sealed partial class AppController
 
     private enum SettingEffects
     {
-        None, Advanced, Telemetry, Animations, Theme, Skin, MaterialTransparency, SurfaceOutline, NativeMaterial, Typography, Markdown,
+        None, Advanced, Animations, Theme, Skin, MaterialTransparency, SurfaceOutline, NativeMaterial, Typography, Markdown,
         ImageReferences, MarkdownAnimations, ExternalExtension, Compress, TodoOrder,
         TodoLinks, TodoRows, LinkedCapsules, TopBar, SystemVisibility, Fullscreen, Resize,
         CapsuleMode, Arrange, CapsuleClose, Titles, Preview, HoverIntent, EdgeTopmost,
         Opacity, Focus, Passive, Reminders, Magnet, Tether, TetherOptions, TetherVisibility,
-        Scripts, VisibilitySnapshot, Shortcuts, Mcp
+        VisibilitySnapshot, Shortcuts, Mcp
     }
 
     private PaperSettingDefinition DefineSetting<T>(string id, Func<T> get, Action<T> set,
@@ -230,7 +230,6 @@ public sealed partial class AppController
                 _shortcutRecordingCommandId = null;
                 ClearShortcutApplyFailure();
                 break;
-            case SettingEffects.Telemetry: TelemetryService.SetEnabled(State.TelemetryEnabled); break;
             case SettingEffects.Theme: RefreshThemeSurfaces(); break;
             case SettingEffects.Skin: RefreshSkinSurfaces(); break;
             case SettingEffects.MaterialTransparency:
@@ -314,12 +313,6 @@ public sealed partial class AppController
                     if (State.ExperimentalTetherVisibilityLink) w.RefreshExperimentalTetherVisibilityOptions();
                     else w.DisableExperimentalTetherVisibilityLink();
                 }
-                break;
-            case SettingEffects.Scripts:
-                if (State.UsePersistentPowerShellProcess)
-                    PaperWindow.EnsurePersistentScriptProcessForSettings(State);
-                else
-                    PaperWindow.StopPersistentScriptProcesses();
                 break;
             case SettingEffects.VisibilitySnapshot: ClearVisibilityShortcutRestoreSnapshot(); break;
             case SettingEffects.Mcp: RefreshMcpRuntime(); break;

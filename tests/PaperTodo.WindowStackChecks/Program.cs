@@ -136,7 +136,6 @@ internal static class Program
     {
         var state = new AppState
         {
-            TelemetryEnabled = false,
             EnableAnimations = operation is "animated-hide" or "focus-change-during-fade" or "animated-reopen",
             UseCapsuleMode = false, UseDeepCapsuleMode = false,
             UsePersistentPowerShellProcess = false, McpEnabled = false,

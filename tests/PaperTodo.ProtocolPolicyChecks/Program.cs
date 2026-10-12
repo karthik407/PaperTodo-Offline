@@ -20,11 +20,7 @@ internal static partial class Program
             CheckSettingsLayoutManifest(host);
             CheckSettingActionBehavior(host);
             CheckHiddenStartupVisibility(host);
-            CheckWebRuntimeRequestRouting(host);
-            CheckWebRuntimeBridgeBehavior(host);
             CheckRuntimeApiCompatibility(host, abstractions);
-            CheckWebBodyNavigationIdentity(host);
-            CheckWebMiniSurfaceRecoveryBridge(host);
             CheckTopBarApiCompatibility(host, abstractions);
             CheckPluginRuntimeSettings(host, abstractions);
             CheckProtocol21Contributions(host, abstractions);

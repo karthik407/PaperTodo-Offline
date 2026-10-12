@@ -480,7 +480,6 @@ public sealed class AppState
     public string UiFontPreset { get; set; } = UiFontPresets.Default;
     public string TextRenderingProfile { get; set; } = TextRenderingProfiles.Standard;
     public bool AdvancedSettingsMode { get; set; }
-    public bool TelemetryEnabled { get; set; } = true;
     /// <summary>
     /// When a custom papertodo font is present, bold styles load papertodo_bold / PaperTodo_Bold instead of synthetic SemiBold.
     /// </summary>
@@ -523,7 +522,6 @@ public sealed class AppState
     public bool ShowLinkedPathExtensionOnly { get; set; }
     [JsonPropertyName("hideLinkedNotesFromCapsules")]
     public bool HideLinkedPapersFromCapsules { get; set; }
-    public bool RunLinkedScriptCapsulesOnClick { get; set; }
     public int MaxTitleLength { get; set; } = PaperTitles.DefaultMaxTitleLength;
     public bool UseCapsuleCollapseAll { get; set; } = true;
     public bool CompactMasterCapsule { get; set; }
@@ -583,9 +581,6 @@ public sealed class AppState
     /// </summary>
     public string ResizeGripMode { get; set; } = ResizeGripModes.Soft;
     public string FullscreenTopmostMode { get; set; } = FullscreenTopmostModes.Avoid;
-    public bool UsePersistentPowerShellProcess { get; set; }
-    public bool PreferPowerShell7 { get; set; } = true;
-    public bool HideScriptRunWindow { get; set; } = true;
     // Wire values: 0 = unlimited (legacy/default), -1 = show zero title characters.
     public int DeepCapsuleTitleMeasureCharacterLimit { get; set; }
     public Dictionary<string, string> GlobalHotkeys { get; set; } = new();

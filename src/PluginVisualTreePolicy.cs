@@ -61,20 +61,6 @@ internal static class PluginVisualTreePolicy
             return true;
         }
 
-        for (var type = element.GetType(); type != null; type = type.BaseType)
-        {
-            var fullName = type.FullName ?? string.Empty;
-            if (fullName.StartsWith(
-                    "Microsoft.Web.WebView2.Wpf.WebView2",
-                    StringComparison.Ordinal) ||
-                string.Equals(
-                    type.Assembly.GetName().Name,
-                    "Microsoft.Web.WebView2.Wpf",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
         return false;
     }
 }

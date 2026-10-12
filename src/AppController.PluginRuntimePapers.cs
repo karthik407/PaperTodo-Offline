@@ -61,8 +61,7 @@ public sealed partial class AppController
     }
 
     private static bool CanPluginRuntimeAcceptMessages(PluginRuntimeSlot slot) =>
-        slot.Lease?.Runtime is not WebPluginRuntime webRuntime ||
-        webRuntime.CanAcceptPaperMessages;
+        true;
 
     internal bool PostPluginRuntimeMessageToBody(
         string providerId,

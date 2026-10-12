@@ -272,28 +272,6 @@ public sealed partial class PaperWindow
             return false;
         }
 
-        if (descriptor.Kind == PaperBodyPluginKind.Web &&
-            descriptor.Manifest is { } manifest)
-        {
-            if (!string.IsNullOrWhiteSpace(manifest.MiniEntry))
-            {
-                var declared = manifest.MiniSize;
-                size = new EdgeCapsulePreviewSize(
-                    declared?.Width ?? 320,
-                    declared?.Height ?? 220);
-                source = "WebPluginManifest";
-                return true;
-            }
-
-            // Web fallback width can change with capsule presentation; reserve its actual bounded
-            // compatibility envelope whether the body is loaded or still deferred.
-            size = new EdgeCapsulePreviewSize(
-                PluginFallbackMiniMaximumWidth,
-                Math.Max(PluginFallbackMiniHeight, 220));
-            source = "WebPluginFallbackEnvelope";
-            return true;
-        }
-
         if (descriptor.Kind == PaperBodyPluginKind.Native && !_isShellBuilt)
         {
             // The body session has not run yet, so PreferredMiniViewSize is intentionally unknown.

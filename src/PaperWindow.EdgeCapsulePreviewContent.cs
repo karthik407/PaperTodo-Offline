@@ -87,14 +87,14 @@ public sealed partial class PaperWindow
         if (_controller.State.EnableTodoPaperLinks &&
             _controller.TryGetLinkedPaperTitle(item.LinkedPaperId, out _))
         {
-            if (!_controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId) ||
-                !_controller.RunLinkedScriptCapsule(item.LinkedPaperId))
-            {
-                _controller.OpenLinkedPaper(
-                    item.LinkedPaperId,
-                    this,
-                    toggleIfExcludedFromCapsules: true);
-            }
+            //if (!_controller.ShouldRunLinkedScriptCapsule(item.LinkedPaperId) ||
+            //    !_controller.RunLinkedScriptCapsule(item.LinkedPaperId))
+            //{
+            _controller.OpenLinkedPaper(
+                item.LinkedPaperId,
+                this,
+                toggleIfExcludedFromCapsules: true);
+            //}
             return true;
         }
 

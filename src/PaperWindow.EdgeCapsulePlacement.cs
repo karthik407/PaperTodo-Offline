@@ -389,11 +389,11 @@ public sealed partial class PaperWindow
     /// </summary>
     private double MeasureDeepCapsuleIconSlotWidth(double pixelsPerDip)
     {
-        if (IsScriptCapsule())
+        /* if (IsScriptCapsule())
         {
             _edgeCapsuleHost?.SetDefaultIconSlotWidth(0);
             return MeasureCapsuleIconWidth(pixelsPerDip);
-        }
+        } */
 
         var todoWidth = MeasureCapsuleTextWidth(
             "✓",

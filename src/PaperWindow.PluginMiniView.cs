@@ -69,23 +69,6 @@ public sealed partial class PaperWindow
                     visible));
         }
 
-        if (_paperBodyHost.Current is WebPaperBodySession webSession &&
-            webSession.HasMiniEntry)
-        {
-            // A declared 1.8 mini surface is itself the preview content. Do not paint an enlarged
-            // 1.6/1.7 capsule while the WebView is becoming ready; that compatibility fallback is
-            // only the final preview for plugins that did not declare a 1.8 mini surface.
-            var descriptor = webSession.DescribeMiniView(
-                context,
-                static (_, _) => new Grid { Background = Brushes.Transparent });
-            return descriptor with
-            {
-                Size = ValidatePluginMiniPreferredSize(descriptor.Size),
-                DeferContentCreation = false
-            };
-        }
-
-
         // No dedicated preview capability: the enlarged capsule is the final preview, not
         // an intermediate loading view that will later be replaced.
         return DescribePluginCapsuleFallback(context);

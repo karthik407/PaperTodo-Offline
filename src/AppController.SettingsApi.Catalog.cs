@@ -19,11 +19,6 @@ public sealed partial class AppController
             value => State.AdvancedSettingsMode = value,
             SettingEffects.Advanced,
             title: Strings.Get("SettingsAdvancedMode"));
-        yield return DefineSetting<bool>("privacy.anonymous_usage",
-            () => State.TelemetryEnabled,
-            value => State.TelemetryEnabled = value,
-            SettingEffects.Telemetry,
-            title: TelemetryStrings.Get("HelpImprove"));
         yield return DefineSetting<bool>("general.tooltips",
             () => State.EnableToolTips,
             value => State.EnableToolTips = value,
@@ -214,12 +209,11 @@ public sealed partial class AppController
             value => State.HideLinkedPapersFromCapsules = value,
             SettingEffects.LinkedCapsules,
             title: Strings.Get("SettingsHideLinkedPapersFromCapsules"));
-        yield return DefineSetting<bool>("scripts.run_linked_on_click",
+        /* yield return DefineSetting<bool>("scripts.run_linked_on_click",
             () => State.RunLinkedScriptCapsulesOnClick,
             value => State.RunLinkedScriptCapsulesOnClick = value,
             SettingEffects.TodoRows,
-            title: Strings.Get("SettingsRunLinkedScriptCapsulesOnClick"));
-        // Compatibility aliases now move items across a single global divider.
+            title: Strings.Get("SettingsRunLinkedScriptCapsulesOnClick")); */
         yield return DefineSetting<bool>("topbar.new_todo",
             () => PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.NewTodo),
             value => PaperTopBarShortcuts.SetPinned(State, PaperTopBarShortcuts.NewTodo, value),
@@ -494,7 +488,7 @@ public sealed partial class AppController
             SettingEffects.TetherVisibility,
             title: Strings.Get("LabsTetherMinimizedBehavior"),
             options: ["hide", "capsule"]);
-        yield return DefineSetting<bool>("scripts.persistent_process",
+        /* yield return DefineSetting<bool>("scripts.persistent_process",
             () => State.UsePersistentPowerShellProcess,
             value => State.UsePersistentPowerShellProcess = value,
             SettingEffects.Scripts,
@@ -508,7 +502,7 @@ public sealed partial class AppController
             () => State.HideScriptRunWindow,
             value => State.HideScriptRunWindow = value,
             SettingEffects.None,
-            title: Strings.Get("SettingsHideScriptRunWindow"));
+            title: Strings.Get("SettingsHideScriptRunWindow")); */
         yield return DefineSetting<bool>("shortcuts.preserve_linked_hidden",
             () => State.PreserveLinkedPaperHiddenStateInVisibilityShortcuts,
             value => State.PreserveLinkedPaperHiddenStateInVisibilityShortcuts = value,
