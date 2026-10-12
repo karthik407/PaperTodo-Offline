@@ -2,7 +2,6 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using PaperTodo;
 using PaperTodo.Plugin;
@@ -47,158 +46,155 @@ internal static class TodoHistoryChecks
         var paper = controller.State.Papers.Single(value => value.Id == "history");
         var windows = (Dictionary<string, PaperWindow>)Field(controller, "_windows");
         var window = windows[paper.Id];
-        var panel = InstallCountingPanel(window);
-        await Idle();
+        var panel = (StackPanel)Field(window, "_todoPanel");
 
-        // Ordinary single-paper lists must preserve live editors and focus even when the
-        // no-move path skips the LIS. Also cover append-area synchronization on that path.
+        // Refresh the production list and check editing state, not its reconciliation strategy.
         foreach (var count in new[] { 1, 5, 10 })
         {
             await Reset(count);
-            var unchanged = Capture(window, paper);
             var focused = Editors(window)["row-0"];
             focused.Select(2, 4);
             var caret = (focused.SelectionStart, focused.SelectionLength, focused.CaretIndex);
-            panel.ResetCounts();
             ReconcileRows(window);
             await Idle();
-            RequireVisualChanges(panel, 0, 0, $"{count}-row unchanged refresh");
-            RequireRetained(unchanged, window, paper, [], $"{count}-row unchanged refresh");
+            RequirePresentation(window, paper, $"{count}-row unchanged refresh");
+            focused = Editors(window)["row-0"];
             RequireSelection(focused, caret, $"{count}-row unchanged refresh");
             Require(focused.IsKeyboardFocused, "unchanged small-list refresh lost keyboard focus");
             controller.State.ShowTodoBottomBar = true;
             ReconcileRows(window);
-            Require(panel.Children.Count == count + 1, "no-move refresh failed to enable append area");
+            Require(panel.Children.Count == count + 1, "refresh failed to enable append area");
             controller.State.ShowTodoBottomBar = false;
             ReconcileRows(window);
             RequireNoAppendArea(window);
         }
+        // Reordering/rebuilding another Todo must preserve the focused row's actual
+        // native text history as well as its visible text, caret and selection.
+        await Reset(6);
+        var unaffected = Editors(window)["row-0"];
+        var originalUnaffectedText = unaffected.Text;
+        unaffected.Select(unaffected.Text.Length, 0);
+        unaffected.SelectedText = " pending edit";
+        Require(unaffected.CanUndo, "unrelated-row fixture did not record a native text edit");
+        unaffected.Select(2, 4);
+        var unaffectedSelection = (unaffected.SelectionStart, unaffected.SelectionLength, unaffected.CaretIndex);
+        var changedRow = paper.Items[^1];
+        paper.Items.RemoveAt(paper.Items.Count - 1);
+        changedRow.Text += " refreshed";
+        paper.Items.Insert(1, changedRow);
+        ReconcileRows(window, [changedRow.Id]);
+        await Idle();
+        Require(paper.Items[1].Id == changedRow.Id, "reordering the changed Todo did not take effect");
+        RequirePresentation(window, paper, "unrelated row moved and rebuilt");
+        unaffected = Editors(window)["row-0"];
+        Require(unaffected.IsKeyboardFocused && unaffected.CanUndo,
+            "reordering an unrelated Todo lost the focused editor or its native undo history");
+        RequireSelection(unaffected, unaffectedSelection, "unrelated row moved and rebuilt");
+        unaffected.Undo();
+        Require(unaffected.Text == originalUnaffectedText && paper.Items[0].Text == originalUnaffectedText,
+            "the unrelated Todo refresh broke native undo or its live text binding");
+        unaffected.Redo();
+        Require(unaffected.Text == originalUnaffectedText + " pending edit" &&
+                paper.Items[0].Text == unaffected.Text,
+            "the unrelated Todo refresh broke native redo or its live text binding");
         await Reset(12);
 
-        // Pure reorder changes list position, not the models captured by row event handlers.
+        // Reordering and history must preserve the user's selection and keep live edits working.
         var originalOrder = paper.Items.Select(item => item.Id).ToArray();
         var move = typeof(PaperWindow).GetMethod("MoveItems", Private)!;
         var after = Enum.Parse(move.GetParameters()[2].ParameterType, "After");
-        panel.ResetCounts();
         move.Invoke(window, [new[] { "row-0" }, "row-11", after, "row-0"]);
         await Idle();
-        RequireVisualChanges(panel, 1, 1, "first-to-last drag");
+        Require(paper.Items[^1].Id == "row-0", "drag did not move the row to the end");
+        RequirePresentation(window, paper, "first-to-last drag");
         var editor = Editors(window)["row-0"];
         await Focus(window, editor);
         editor.Select(3, 6);
         var selection = (editor.SelectionStart, editor.SelectionLength, editor.CaretIndex);
-        var before = Capture(window, paper);
-        panel.ResetCounts();
         await SendKey(window, Key.Z);
-        RequireVisualChanges(panel, 1, 1, "last-to-first undo");
         Require(paper.Items.Select(item => item.Id).SequenceEqual(originalOrder), "reorder undo did not restore list order");
-        RequireRetained(before, window, paper, [], "reorder undo");
+        RequirePresentation(window, paper, "reorder undo");
+        editor = Editors(window)["row-0"];
         RequireSelection(editor, selection, "reorder undo");
         Require(editor.IsKeyboardFocused, "reorder undo lost actual keyboard focus on the moved row");
-        before = Capture(window, paper);
-        panel.ResetCounts();
         await SendKey(window, Key.Y);
-        RequireVisualChanges(panel, 1, 1, "first-to-last redo");
         Require(paper.Items[^1].Id == "row-0", "reorder redo did not restore the moved row");
-        RequireRetained(before, window, paper, [], "reorder redo");
+        RequirePresentation(window, paper, "reorder redo");
+        editor = Editors(window)["row-0"];
         RequireSelection(editor, selection, "reorder redo");
         Require(editor.IsKeyboardFocused, "reorder redo lost actual keyboard focus on the moved row");
         RequireHistoryIsolation(window, paper);
 
-        // Retained editor and checkbox closures must keep writing to the current live items.
+        // Editor and checkbox handlers must keep writing to the current live items.
         editor.Select(editor.Text.Length, 0);
         editor.SelectedText = " live edit";
         Require(paper.Items.Single(item => item.Id == "row-0").Text == editor.Text,
-            "retained editor wrote to a detached snapshot item");
+            "editor wrote to a detached snapshot item");
         CheckBox(window, "row-1").IsChecked = true;
         Require(paper.Items.Single(item => item.Id == "row-1").Done,
-            "retained checkbox wrote to a detached snapshot item");
+            "checkbox wrote to a detached snapshot item");
         RequireHistoryIsolation(window, paper);
 
-        // Count real WPF visual parent changes, not just retained object identities. Moving
-        // a short group keeps the longer unchanged group attached in either direction.
+        // Group order and undo/redo do not depend on how many visual children were moved.
         await Reset(8);
-        before = Capture(window, paper);
-        panel.ResetCounts();
+        string[] groupOrder = ["row-2", "row-3", "row-4", "row-5", "row-6", "row-7", "row-0", "row-1"];
         move.Invoke(window, [new[] { "row-0", "row-1" }, "row-7", after, "row-0"]);
         await Idle();
-        RequireVisualChanges(panel, 2, 2, "group drag");
-        Require(paper.Items.Select(item => item.Id).SequenceEqual(["row-2", "row-3", "row-4", "row-5", "row-6", "row-7", "row-0", "row-1"]),
+        Require(paper.Items.Select(item => item.Id).SequenceEqual(groupOrder),
             "group drag did not retain the moved group's relative order");
-        RequireRetained(before, window, paper, [], "group drag");
-        before = Capture(window, paper);
-        panel.ResetCounts();
+        RequirePresentation(window, paper, "group drag");
         await SendKey(window, Key.Z);
-        RequireVisualChanges(panel, 2, 2, "group undo");
-        RequireRetained(before, window, paper, [], "group undo");
-        panel.ResetCounts();
+        Require(paper.Items.Select(item => item.Id).SequenceEqual(Items(8).Select(item => item.Id)),
+            "group undo did not restore the original order");
+        RequirePresentation(window, paper, "group undo");
         await SendKey(window, Key.Y);
-        RequireVisualChanges(panel, 2, 2, "group redo");
-        RequireRetained(before, window, paper, [], "group redo");
+        Require(paper.Items.Select(item => item.Id).SequenceEqual(groupOrder),
+            "group redo did not restore the moved group's order");
+        RequirePresentation(window, paper, "group redo");
 
         // Arbitrary target orders exercise reconciliation independently of drag setup.
-        // Reversing all rows needs n-1 moves; an unchanged order needs none.
         await Reset(6);
-        before = Capture(window, paper);
-        panel.ResetCounts();
         ReconcileRows(window);
-        RequireVisualChanges(panel, 0, 0, "unchanged order");
+        RequirePresentation(window, paper, "unchanged order");
         Invoke(window, "PushUndoSnapshot");
         paper.Items.Reverse();
-        panel.ResetCounts();
         ReconcileRows(window);
         await Idle();
-        RequireVisualChanges(panel, 5, 5, "reversal");
-        RequireRetained(before, window, paper, [], "reversal");
+        Require(paper.Items.Select(item => item.Id).SequenceEqual(Items(6).Select(item => item.Id).Reverse()),
+            "reconciliation did not preserve the requested reverse order");
+        RequirePresentation(window, paper, "reversal");
         await Focus(window, Editors(window)["row-0"]);
-        panel.ResetCounts();
         await SendKey(window, Key.Z);
-        RequireVisualChanges(panel, 5, 5, "reversal undo");
         Require(paper.Items.Select(item => item.Id).SequenceEqual(Items(6).Select(item => item.Id)),
             "reversal undo did not restore the original order");
-        RequireRetained(before, window, paper, [], "reversal undo");
+        RequirePresentation(window, paper, "reversal undo");
 
-        // Mixed removals, a changed row and an insertion use actual remaining visual
-        // positions. The enabled append area stays attached at the end throughout.
+        // Mixed removals, a changed row and an insertion keep the current presentation in sync.
         await Reset(8);
         controller.State.ShowTodoBottomBar = true;
         Invoke(window, "SyncTodoAppendArea");
         await Idle();
-        var appendArea = (Border)Field(window, "_appendArea");
         var oldItems = paper.Items.ToArray();
-        before = Capture(window, paper);
         Invoke(window, "PushUndoSnapshot");
         var changedItem = TodoRules.Clone(oldItems[2]);
         changedItem.Text += " rebuilt";
         paper.Items = [oldItems[6], new PaperItem { Id = "inserted", Text = "inserted row" }, oldItems[0], changedItem, oldItems[3], oldItems[7], oldItems[4]];
-        panel.ResetCounts();
         ReconcileRows(window, ["row-2"]);
         await Idle();
-        RequireVisualChanges(panel, 4, 5, "mixed reconciliation");
-        RequireRetained(before, window, paper, ["row-2"], "mixed reconciliation", appendArea: true);
-        Require(!panel.Removed.Contains(appendArea), "mixed reconciliation detached the append area");
+        RequirePresentation(window, paper, "mixed reconciliation", appendArea: true);
         await Focus(window, Editors(window)["row-6"]);
-        before = Capture(window, paper);
-        panel.ResetCounts();
         await SendKey(window, Key.Z);
-        RequireVisualChanges(panel, 5, 4, "mixed undo");
         Require(paper.Items.Select(item => item.Id).SequenceEqual(Items(8).Select(item => item.Id)),
             "mixed undo did not restore removed rows and their order");
-        RequireRetained(before, window, paper, ["row-2"], "mixed undo", appendArea: true);
-        Require(!panel.Removed.Contains(appendArea), "mixed undo detached the append area");
-        before = Capture(window, paper);
-        panel.ResetCounts();
+        RequirePresentation(window, paper, "mixed undo", appendArea: true);
         await SendKey(window, Key.Y);
-        RequireVisualChanges(panel, 4, 5, "mixed redo");
         Require(paper.Items.Select(item => item.Id).SequenceEqual(["row-6", "inserted", "row-0", "row-2", "row-3", "row-7", "row-4"]),
             "mixed redo did not restore the inserted row and target order");
-        RequireRetained(before, window, paper, ["row-2"], "mixed redo", appendArea: true);
-        Require(!panel.Removed.Contains(appendArea) && ReferenceEquals(Field(window, "_appendArea"), appendArea),
-            "mixed redo replaced or detached the append area");
+        RequirePresentation(window, paper, "mixed redo", appendArea: true);
         RequireHistoryIsolation(window, paper);
 
         // Native text undo has priority before list history. A list history boundary then
-        // clears native history on retained controls, as the former full rebuild did.
+        // clears native history so old editor changes cannot be replayed against a new model.
         await Reset(4);
         editor = Editors(window)["row-0"];
         await Focus(window, editor);
@@ -215,10 +211,10 @@ internal static class TodoHistoryChecks
         await Focus(window, Editors(window)["row-1"]);
         CheckBox(window, "row-1").IsChecked = true;
         Require(History(window, "_undoStack").Count == 2, "manual edit and checkbox did not form two history steps");
-        before = Capture(window, paper);
         await SendKey(window, Key.Z);
-        RequireRetained(before, window, paper, ["row-1"], "checkbox undo");
-        Require(!editor.CanUndo && !editor.CanRedo, "list undo left stale native editor history on a retained row");
+        RequirePresentation(window, paper, "checkbox undo");
+        editor = Editors(window)["row-0"];
+        Require(!editor.CanUndo && !editor.CanRedo, "list undo left stale native editor history on a live row");
         Require(!paper.Items[1].Done && paper.Items[0].Text == originalText + " human",
             "checkbox undo also replayed the earlier human edit");
         await SendKey(window, Key.Z);
@@ -229,8 +225,8 @@ internal static class TodoHistoryChecks
             "redo did not preserve human edit then checkbox ordering");
         RequireHistoryIsolation(window, paper);
 
-        // Every persisted row presentation field must invalidate the affected row. The offset
-        // case deliberately has the same UTC instant, but a different persisted DateTimeOffset.
+        // Every persisted row field must survive undo/redo. The offset case deliberately
+        // has the same UTC instant, but a different persisted DateTimeOffset.
         var reminder = DateTimeOffset.UtcNow.AddDays(30);
         (string Name, Action<PaperItem>? Prepare, Action<PaperItem> Change)[] fields =
         [
@@ -253,13 +249,11 @@ internal static class TodoHistoryChecks
             window.RefreshTodoRowsForExternalChange();
             await Idle();
             await Focus(window, Editors(window)["row-1"]);
-            before = Capture(window, paper);
             await SendKey(window, Key.Z);
-            RequireRetained(before, window, paper, ["row-0"], name + " undo");
+            RequirePresentation(window, paper, name + " undo");
             RequireItem(paper.Items[0], previous, name + " undo model");
-            before = Capture(window, paper);
             await SendKey(window, Key.Y);
-            RequireRetained(before, window, paper, ["row-0"], name + " redo");
+            RequirePresentation(window, paper, name + " redo");
             RequireItem(paper.Items[0], changed, name + " redo model");
             RequireHistoryIsolation(window, paper);
         }
@@ -289,16 +283,184 @@ internal static class TodoHistoryChecks
             "external redo order or current model was lost");
         RequireHistoryIsolation(window, paper);
 
+        // The arrow only appears above four *visual* lines; folding leaves one editable text value.
+        await Reset(4, item => item.Text = string.Join(Environment.NewLine,
+            Enumerable.Range(1, 5).Select(index => "line " + index)));
+        editor = Editors(window)["row-0"];
+        window.UpdateLayout();
+        await Idle();
+        var longText = editor.Text;
+        var expandedHeight = editor.ActualHeight;
+        var foldButton = FoldButton(window, "row-0");
+        Require(editor.LineCount == 5 && foldButton.Visibility == Visibility.Visible &&
+                editor.MaxLines == int.MaxValue, "five-line todo did not offer an initially expanded fold control");
+        Keyboard.ClearFocus();
+        await Idle();
+        ClickFold(foldButton);
+        await Idle();
+        Require(editor.MaxLines == 2 && editor.LineCount == 5 && editor.ActualHeight < expandedHeight &&
+                editor.Text == longText && paper.Items[0].Text == longText && paper.Items.Count == 4,
+            "folding changed the model or failed to reduce the visible height to two lines");
+        var foldPreview = FoldPreview(window, "row-0");
+        Require(foldPreview.Visibility == Visibility.Visible &&
+                foldPreview.TextTrimming == TextTrimming.CharacterEllipsis &&
+                foldPreview.TextWrapping == TextWrapping.NoWrap &&
+                foldPreview.Text.EndsWith("…", StringComparison.Ordinal) &&
+                foldPreview.Text != longText &&
+                foldPreview.ActualWidth > 0 && foldPreview.ActualHeight > 0 &&
+                foldPreview.ActualHeight <= editor.ActualHeight + 1 && editor.Opacity == 0,
+            "folded todo must show a two-line visual ellipsis without modifying the editor or model");
+        Require(HasRasterEllipsis(foldPreview),
+            "folded preview must actually render an ellipsis on the final visible line");
+
+        // A visible find hit must expose the native TextBox selection highlight.
+        // Search in the clipped third+ line still takes the existing row/arrow cue.
+        editor.Select(0, 4);
+        editor.IsInactiveSelectionHighlightEnabled = true;
+        await Idle();
+        Require(foldPreview.Visibility == Visibility.Collapsed && editor.Opacity == 1 &&
+                editor.MaxLines == 2 && paper.Items[0].Text == longText,
+            "visible find selection was hidden behind the folded ellipsis preview");
+        editor.IsInactiveSelectionHighlightEnabled = false;
+        await Idle();
+        Require(foldPreview.Visibility == Visibility.Visible && editor.Opacity == 0,
+            "clearing a visible find hit did not restore the folded ellipsis preview");
+
+        editor.IsSweepSelected = true;
+        await Idle();
+        Require(foldPreview.Visibility == Visibility.Collapsed && editor.Opacity == 1,
+            "sweep-selected folded text lost its original selection drawing");
+        editor.IsSweepSelected = false;
+        await Idle();
+        Require(foldPreview.Visibility == Visibility.Visible && editor.Opacity == 0,
+            "clearing sweep selection did not restore the folded preview");
+
+        Invoke(window, "RefreshTodoFindCues");
+        var foldGlyph = (System.Windows.Shapes.Path)foldButton.Child;
+        Require(Math.Abs(foldGlyph.Opacity - 0.48) < 0.001,
+            "a search cue refresh changed the folded icon's neutral opacity");
+        await Focus(window, editor);
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.MaxLines == int.MaxValue && editor.ActualHeight >= expandedHeight - 1,
+            "focusing a folded todo did not restore the full editor height");
+        Require(foldPreview.Visibility == Visibility.Collapsed && editor.Opacity == 1,
+            "editing a folded todo retained its ellipsis overlay");
+        Keyboard.ClearFocus();
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.MaxLines == 2 && editor.ActualHeight < expandedHeight - 1,
+            "leaving a folded todo did not restore two visible lines");
+        Require(foldPreview.Visibility == Visibility.Visible && editor.Opacity == 0,
+            "leaving the editor did not restore the ellipsis preview");
+        ReconcileRows(window, ["row-0"]);
+        await Idle();
+        editor = Editors(window)["row-0"];
+        foldButton = FoldButton(window, "row-0");
+        Require(editor.MaxLines == 2 && foldButton.Visibility == Visibility.Visible &&
+                editor.Text == longText, "rebuilt todo row lost its folded display state");
+        Require(FoldPreview(window, "row-0").Visibility == Visibility.Visible,
+            "rebuilding the row did not restore the ellipsis preview");
+        ClickFold(foldButton);
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.MaxLines == int.MaxValue && editor.ActualHeight >= expandedHeight - 1 &&
+                editor.Text == longText,
+            "expanding a folded todo did not restore the full editor content and height");
+        Require(FoldPreview(window, "row-0").Visibility == Visibility.Collapsed,
+            "expanding a folded todo did not hide its preview");
+
+        // A completed long todo may draw strikethrough lines only inside its
+        // clipped, two-line editor; hidden lines must not paint over later rows.
+        paper.Items[0].Done = true;
+        ReconcileRows(window, ["row-0"]);
+        await Idle();
+        editor = Editors(window)["row-0"];
+        foldButton = FoldButton(window, "row-0");
+        Require(editor.IsDone && foldButton.Visibility == Visibility.Visible,
+            "completed multiline todo lost its fold control");
+        ClickFold(foldButton);
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.MaxLines == 2 && editor.ActualHeight < expandedHeight - 1 &&
+                editor.ClipToBounds,
+            "completed folded todo did not bound its strikethrough presentation");
+        paper.Items[0].Done = false;
+        ReconcileRows(window, ["row-0"]);
+        await Idle();
+        editor = Editors(window)["row-0"];
+        foldButton = FoldButton(window, "row-0");
+
+        editor.Text = string.Join(Environment.NewLine, Enumerable.Range(1, 4).Select(i => "line " + i));
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.LineCount == 4 && foldButton.Visibility == Visibility.Collapsed,
+            "four-line todo incorrectly retained the fold button");
+
+        // Wrapping and paper width also change eligibility without editing the text.
+        editor.Text = new string('W', 70);
+        editor.Width = 80;
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.LineCount > 4 && foldButton.Visibility == Visibility.Visible,
+            "narrow wrapped todo did not offer folding");
+        Keyboard.ClearFocus();
+        ClickFold(foldButton);
+        await Idle();
+        Require(editor.MaxLines == 2, "wrapped todo did not fold");
+        var wrapPreview = FoldPreview(window, "row-0");
+        Require(wrapPreview.Visibility == Visibility.Visible &&
+                Math.Abs(wrapPreview.ActualWidth - editor.ActualWidth) < 1,
+            "soft-wrapped todo ellipsis did not match the editor width");
+        editor.Width = 450;
+        window.UpdateLayout();
+        await Idle();
+        Require(editor.LineCount <= 4 && foldButton.Visibility == Visibility.Collapsed &&
+                editor.MaxLines == int.MaxValue, "widening a folded todo failed to remove an unnecessary fold");
+        Require(wrapPreview.Visibility == Visibility.Collapsed && editor.Opacity == 1,
+            "widening the editor left an obsolete folded preview");
+
+        // Shift+Enter edits one todo, respects the selected text and the input limit,
+        // and stays within the native text undo/redo history.
+        await Reset(4);
+        editor = Editors(window)["row-0"];
+        var originalLine = editor.Text;
+        editor.Select(4, 0);
+        await SendKey(window, Key.Enter, expectPaperHistory: false, control: false, shift: true);
+        var multiline = originalLine.Insert(4, Environment.NewLine);
+        Require(paper.Items.Count == 4, "Shift+Enter created an unexpected todo row");
+        Require(editor.Text == multiline && paper.Items[0].Text == multiline,
+            "Shift+Enter did not insert a line break into the current todo");
+        Require(editor.SelectionLength == 0 && editor.CaretIndex == 4 + Environment.NewLine.Length,
+            "Shift+Enter did not collapse the inserted selection after the line break");
+        Require(editor.CanUndo && History(window, "_undoStack").Count == 0,
+            "Shift+Enter bypassed native text history");
+        await SendKey(window, Key.Z, expectPaperHistory: false);
+        Require(editor.Text == originalLine && paper.Items[0].Text == originalLine,
+            "native undo did not remove the inserted line break");
+        await SendKey(window, Key.Y, expectPaperHistory: false);
+        Require(editor.Text == multiline && paper.Items[0].Text == multiline,
+            "native redo did not restore the inserted line break");
+        editor.MaxLength = editor.Text.Length;
+        editor.Select(2, 0);
+        await SendKey(window, Key.Enter, expectPaperHistory: false, control: false, shift: true);
+        Require(editor.Text == multiline && paper.Items.Count == 4,
+            "Shift+Enter exceeded the todo text length limit");
+        editor.Select(2, 2);
+        await SendKey(window, Key.Enter, expectPaperHistory: false, control: false, shift: true);
+        Require(editor.Text == multiline.Remove(2, 2).Insert(2, Environment.NewLine) && paper.Items.Count == 4 &&
+                editor.SelectionLength == 0 && editor.CaretIndex == 2 + Environment.NewLine.Length,
+            "Shift+Enter did not replace and collapse a selection at the text length limit");
+
         // Enter insertion, last-row deletion and the disabled append area retain their contracts.
         await Reset(4);
         await Focus(window, Editors(window)["row-0"]);
         await SendKey(window, Key.Enter, expectPaperHistory: false, control: false);
         var insertedId = paper.Items[1].Id;
         Require(paper.Items.Count == 5 && Editors(window)[insertedId].IsKeyboardFocused, "Enter did not create and focus a new row");
-        before = Capture(window, paper);
         await SendKey(window, Key.Z);
         Require(paper.Items.Count == 4 && paper.Items.All(item => item.Id != insertedId), "insert undo retained the added row");
-        RequireRetained(before, window, paper, [], "insert undo");
+        RequirePresentation(window, paper, "insert undo");
         await Focus(window, Editors(window)["row-0"]);
         await SendKey(window, Key.Y);
         Require(paper.Items.Count == 5 && paper.Items[1].Id == insertedId, "insert redo changed the new row identity");
@@ -332,7 +494,7 @@ internal static class TodoHistoryChecks
             "restored row retained its obsolete deletion animation");
         RequireNoAppendArea(window);
         RequireHistoryIsolation(window, paper);
-        Console.WriteLine("PASS Todo history: native Ctrl+Z/Y, minimal visual row moves, model identity, all row fields, text-history priority, external ordering, insertion/deletion and animation interruption");
+        Console.WriteLine("PASS Todo history: native Ctrl+Z/Y, row order and presentation, multiline folding and focus, width changes, unrelated editor undo/redo and selection, all row fields, external ordering, insertion/deletion and animation interruption");
 
         async Task Reset(int count, Action<PaperItem>? prepare = null)
         {
@@ -362,7 +524,7 @@ internal static class TodoHistoryChecks
         Require(editor.IsKeyboardFocused, "fixture could not give the live Todo editor keyboard focus");
     }
 
-    private static async Task SendKey(PaperWindow window, Key key, bool expectPaperHistory = true, bool control = true)
+    private static async Task SendKey(PaperWindow window, Key key, bool expectPaperHistory = true, bool control = true, bool shift = false)
     {
         var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observed = false;
@@ -379,7 +541,7 @@ internal static class TodoHistoryChecks
         try
         {
             var virtualKey = (ushort)KeyInterop.VirtualKeyFromKey(key);
-            LifecycleInput.KeyChord(control ? [0x11, virtualKey] : [virtualKey]);
+            LifecycleInput.KeyChord(control ? [0x11, virtualKey] : shift ? [0x10, virtualKey] : [virtualKey]);
             await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             await Idle();
             Require(observed, "native keyboard input was not received by the PaperWindow");
@@ -393,25 +555,94 @@ internal static class TodoHistoryChecks
         }
     }
 
-    private sealed record Snapshot(Dictionary<string, Border> Rows, Dictionary<string, TodoTextBox> Editors,
-        Dictionary<string, PaperItem> Items);
+    private static bool HasRasterEllipsis(TextBlock preview)
+    {
+        // Compare the real WPF glyph raster with an otherwise identical
+        // two-line TextBlock without trimming. Property-only checks cannot
+        // establish that the final visible line actually gained an ellipsis.
+        var width = (int)Math.Ceiling(preview.ActualWidth);
+        var height = (int)Math.Ceiling(preview.ActualHeight);
+        if (width < 20 || height < 14) return false;
 
-    private static Snapshot Capture(PaperWindow window, PaperData paper) =>
-        new(Rows(window), new Dictionary<string, TodoTextBox>(Editors(window)), paper.Items.ToDictionary(item => item.Id));
+        byte[] Render(string text)
+        {
+            var sample = new TextBlock
+            {
+                Text = text,
+                TextWrapping = preview.TextWrapping,
+                TextTrimming = preview.TextTrimming,
+                TextAlignment = preview.TextAlignment,
+                FontFamily = preview.FontFamily,
+                FontSize = preview.FontSize,
+                FontWeight = preview.FontWeight,
+                FontStyle = preview.FontStyle,
+                FontStretch = preview.FontStretch,
+                Padding = preview.Padding,
+                LineHeight = preview.LineHeight,
+                Foreground = preview.Foreground,
+                ClipToBounds = true,
+                Width = preview.ActualWidth,
+                Height = preview.ActualHeight
+            };
+            sample.Measure(new Size(preview.ActualWidth, preview.ActualHeight));
+            sample.Arrange(new Rect(0, 0, preview.ActualWidth, preview.ActualHeight));
+            sample.UpdateLayout();
 
-    private static void RequireRetained(Snapshot before, PaperWindow window, PaperData paper, string[] changed, string operation,
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                width, height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(sample);
+            var pixels = new byte[width * height * 4];
+            bitmap.CopyPixels(pixels, width * 4, 0);
+            return pixels;
+        }
+
+        if (!preview.Text.EndsWith("…", StringComparison.Ordinal)) return false;
+        var trimmed = Render(preview.Text);
+        var ordinary = Render(preview.Text[..^1]);
+        var changedInkPixels = 0;
+        for (var y = height / 3; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var alphaIndex = (y * width + x) * 4 + 3;
+            if (Math.Abs(trimmed[alphaIndex] - ordinary[alphaIndex]) > 48)
+                changedInkPixels++;
+        }
+        return changedInkPixels >= 4;
+    }
+
+    private static TextBlock FoldPreview(PaperWindow window, string id)
+    {
+        var grid = (Grid)Rows(window)[id].Child;
+        return grid.Children.OfType<TextBlock>()
+            .Single(child => Equals(child.Tag, "TodoFoldPreview"));
+    }
+
+    private static Border FoldButton(PaperWindow window, string id)
+    {
+        var grid = (Grid)Rows(window)[id].Child;
+        var trailing = grid.Children.OfType<Grid>()
+            .Single(child => Grid.GetColumn(child) == grid.ColumnDefinitions.Count - 1);
+        return trailing.Children.OfType<Border>()
+            .Single(child => Grid.GetRow(child) == 0);
+    }
+
+    private static void ClickFold(Border button)
+    {
+        button.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.MouseLeftButtonUpEvent
+        });
+    }
+
+    private static void RequirePresentation(PaperWindow window, PaperData paper, string operation,
         bool appendArea = false)
     {
         var rows = Rows(window);
         var editors = Editors(window);
+        Require(rows.Count == paper.Items.Count && editors.Count == paper.Items.Count,
+            operation + " left missing or stale row/editor registrations");
         foreach (var item in paper.Items)
         {
-            if (!before.Items.TryGetValue(item.Id, out var old)) continue;
-            var expected = !changed.Contains(item.Id);
-            Require(ReferenceEquals(old, item) == expected &&
-                    ReferenceEquals(before.Rows[item.Id], rows[item.Id]) == expected &&
-                    ReferenceEquals(before.Editors[item.Id], editors[item.Id]) == expected,
-                operation + " did not retain/rebuild the expected model and controls for " + item.Id);
             Require(editors[item.Id].Text == item.Text && editors[item.Id].IsDone == item.Done &&
                     CheckBox(window, item.Id).IsChecked == item.Done,
                 operation + " left stale text or completion presentation for " + item.Id);
@@ -445,56 +676,12 @@ internal static class TodoHistoryChecks
         "a retained live model became shared with a saved history snapshot");
 
     private static void RequireSelection(TodoTextBox editor, (int Start, int Length, int Caret) expected, string operation) => Require(
-        (editor.SelectionStart, editor.SelectionLength, editor.CaretIndex) == expected, operation + " changed the retained text selection");
+        (editor.SelectionStart, editor.SelectionLength, editor.CaretIndex) == expected, operation + " changed the text selection");
 
     private static void RequireNoAppendArea(PaperWindow window) => Require(
         typeof(PaperWindow).GetField("_appendArea", Private)!.GetValue(window) == null &&
         ((StackPanel)Field(window, "_todoPanel")).Children.Count == Rows(window).Count,
         "history replay restored a disabled bottom append area");
-
-    private sealed class CountingStackPanel : StackPanel
-    {
-        internal List<DependencyObject> Added { get; } = [];
-        internal List<DependencyObject> Removed { get; } = [];
-
-        protected override void OnVisualChildrenChanged(DependencyObject visualAdded, DependencyObject visualRemoved)
-        {
-            base.OnVisualChildrenChanged(visualAdded, visualRemoved);
-            if (visualAdded != null) Added.Add(visualAdded);
-            if (visualRemoved != null) Removed.Add(visualRemoved);
-        }
-
-        internal void ResetCounts()
-        {
-            Added.Clear();
-            Removed.Clear();
-        }
-    }
-
-    private static CountingStackPanel InstallCountingPanel(PaperWindow window)
-    {
-        var original = (StackPanel)Field(window, "_todoPanel");
-        DependencyObject? parent = VisualTreeHelper.GetParent(original);
-        while (parent != null && parent is not ScrollViewer)
-            parent = VisualTreeHelper.GetParent(parent);
-        Require(parent is ScrollViewer host && ReferenceEquals(host.Content, original),
-            "fixture could not find the Todo panel's scroll host");
-        var scroll = (ScrollViewer)parent!;
-        var panel = new CountingStackPanel { Margin = original.Margin };
-        SetField(window, "_activeOriginalItemId", null);
-        SetField(window, "_activeOriginalText", null);
-        scroll.Content = null;
-        var children = original.Children.Cast<UIElement>().ToArray();
-        original.Children.Clear();
-        foreach (var child in children) panel.Children.Add(child);
-        SetField(window, "_todoPanel", panel);
-        scroll.Content = panel;
-        return panel;
-    }
-
-    private static void RequireVisualChanges(CountingStackPanel panel, int added, int removed, string operation) => Require(
-        panel.Added.Count == added && panel.Removed.Count == removed,
-        $"{operation} changed too many/few actual WPF visual children: added {panel.Added.Count}, removed {panel.Removed.Count}; expected {added}/{removed}");
 
     private static void ReconcileRows(PaperWindow window, IEnumerable<string>? rebuildIds = null)
     {

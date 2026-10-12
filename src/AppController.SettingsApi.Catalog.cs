@@ -215,18 +215,18 @@ public sealed partial class AppController
             SettingEffects.TodoRows,
             title: Strings.Get("SettingsRunLinkedScriptCapsulesOnClick")); */
         yield return DefineSetting<bool>("topbar.new_todo",
-            () => State.ShowTopBarNewTodoButton,
-            value => State.ShowTopBarNewTodoButton = value,
+            () => PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.NewTodo),
+            value => PaperTopBarShortcuts.SetPinned(State, PaperTopBarShortcuts.NewTodo, value),
             SettingEffects.TopBar,
             title: Strings.Get("SettingsShowTopBarNewTodoButton"));
         yield return DefineSetting<bool>("topbar.new_note",
-            () => State.ShowTopBarNewNoteButton,
-            value => State.ShowTopBarNewNoteButton = value,
+            () => PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.NewNote),
+            value => PaperTopBarShortcuts.SetPinned(State, PaperTopBarShortcuts.NewNote, value),
             SettingEffects.TopBar,
             title: Strings.Get("SettingsShowTopBarNewNoteButton"));
         yield return DefineSetting<bool>("topbar.external_open",
-            () => State.ShowTopBarExternalOpenButton,
-            value => State.ShowTopBarExternalOpenButton = value,
+            () => PaperTopBarShortcuts.IsPinned(State, PaperTopBarShortcuts.ExternalEditor),
+            value => PaperTopBarShortcuts.SetPinned(State, PaperTopBarShortcuts.ExternalEditor, value),
             SettingEffects.TopBar,
             title: Strings.Get("SettingsShowTopBarExternalOpenButton"));
         yield return DefineSetting<bool>("window.hide_from_taskbar",

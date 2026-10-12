@@ -1500,4 +1500,46 @@ papertodo와 PaperTodo_Bold(.ttf/.otf)를 함께 두세요.</value>
   <data name="SkinCaptureNotice" xml:space="preserve">
     <value>캡슐과 메뉴는 표시할 때 뒤쪽의 로컬 배경을 한 번만 캡처하며, 캡슐을 드래그할 때는 저해상도 가상 데스크톱을 한 번만 캡처합니다. 로컬 메모리에서만 사용하며 저장하거나 업로드하지 않습니다.</value>
   </data>
+  <data name="MenuPaperActions" xml:space="preserve">
+    <value>메모 메뉴</value>
+  </data>
+  <data name="MenuCustomizeTopBar" xml:space="preserve">
+    <value>상단 바 사용자 지정</value>
+  </data>
+  <data name="MenuReorderTopBar" xml:space="preserve">
+    <value>버튼 순서 변경</value>
+  </data>
+  <data name="MenuTopBarMoveLeft" xml:space="preserve">
+    <value>왼쪽으로 이동</value>
+  </data>
+  <data name="MenuTopBarMoveRight" xml:space="preserve">
+    <value>오른쪽으로 이동</value>
+  </data>
+  <data name="MenuTopBarAssociationDrag" xml:space="preserve">
+    <value>누른 채 끌어서 연결</value>
+  </data>
+  <data name="MenuTopBarPluginActions" xml:space="preserve">
+    <value>플러그인 작업</value>
+  </data>
+  <data name="TopBarSettingsTitle" xml:space="preserve">
+    <value>상단 바 바로가기</value>
+  </data>
+  <data name="TopBarSettingsHint" xml:space="preserve">
+    <value>끌어서 순서를 변경하거나 표시 위치를 바꿀 수 있습니다.</value>
+  </data>
+  <data name="TopBarShownHeading" xml:space="preserve">
+    <value>상단 바에 표시</value>
+  </data>
+  <data name="TopBarMenuHeading" xml:space="preserve">
+    <value>메뉴에 표시</value>
+  </data>
+  <data name="TopBarEmptyDropArea" xml:space="preserve">
+    <value>항목을 여기로 끌기</value>
+  </data>
+  <data name="TopBarAssociation" xml:space="preserve">
+    <value>연결 드래그</value>
+  </data>
+  <data name="TopBarExternalEditor" xml:space="preserve">
+    <value>외부 편집기로 열기</value>
+  </data>
 </root>

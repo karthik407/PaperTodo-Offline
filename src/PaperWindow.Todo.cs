@@ -14,7 +14,12 @@ namespace PaperTodo;
 public sealed partial class PaperWindow
 {
     private readonly TodoArrowNavigation _todoArrowNavigation = new();
+    private readonly HashSet<string> _foldedTodoItemIds = new(StringComparer.Ordinal);
+    private static readonly Geometry TodoFoldUp = Geometry.Parse("M 2,8 L 6,4 L 10,8");
+    private static readonly Geometry TodoFoldDown = Geometry.Parse("M 2,4 L 6,8 L 10,4");
 
+    private const int TodoFoldThreshold = 4;
+    private const int TodoFoldVisibleLines = 2;
     internal const int TodoTextMaxLength = 5000;
     internal const int MaxPastedTodoLines = 200;
 
@@ -40,6 +45,7 @@ public sealed partial class PaperWindow
             Content = _todoPanel,
             FocusVisualStyle = null
         };
+        scrollViewer.ScrollChanged += OnTodoDragScrollChanged;
         AttachTodoBackgroundHost(scrollViewer);
         return scrollViewer;
     }
@@ -80,11 +86,13 @@ public sealed partial class PaperWindow
         NormalizeTodoItems();
         NormalizeOrders();
         PruneTodoSelection();
+        _foldedTodoItemIds.IntersectWith(_paper.Items.Select(item => item.Id));
 
         // 记录现有行的ID，用于判断哪些是新增的
         var existingIds = new HashSet<string>(_todoRows.Select(r => (string)r.Tag));
 
         _todoPanel.Children.Clear();
+        _todoFoldFindControls.Clear();
         _todoEditors.Clear();
         _todoReminderCountdowns.Clear();
         _todoRows.Clear();
@@ -99,6 +107,7 @@ public sealed partial class PaperWindow
         }
 
         SyncTodoAppendArea();
+        RefreshTodoFindCues();
 
         if (!string.IsNullOrWhiteSpace(targetFocus))
         {
@@ -123,6 +132,7 @@ public sealed partial class PaperWindow
         NormalizeTodoItems();
         NormalizeOrders();
         PruneTodoSelection();
+        _foldedTodoItemIds.IntersectWith(_paper.Items.Select(item => item.Id));
 
         var rebuildIds = rebuildItemIds?.ToHashSet(StringComparer.Ordinal) ?? [];
         var orderedItems = OrderedItems().ToList();
@@ -203,6 +213,7 @@ public sealed partial class PaperWindow
         _todoRows.Clear();
         _todoRows.AddRange(orderedRows);
         SyncTodoAppendArea();
+        RefreshTodoFindCues();
 
         if (!string.IsNullOrWhiteSpace(targetFocus))
         {
@@ -275,6 +286,7 @@ public sealed partial class PaperWindow
         }
 
         _todoEditors.Remove(itemId);
+        _todoFoldFindControls.Remove(itemId);
         _todoReminderCountdowns.Remove(itemId);
         foreach (var paperId in _linkedPaperTitleRefreshers.Keys.ToList())
         {
@@ -652,6 +664,11 @@ public sealed partial class PaperWindow
             MaxLength = TodoTextMaxLength
         };
 
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        var foldPreview = new TodoFoldPreview(text, grid);
+        foldPreview.SetDone(item.Done);
+
         _todoEditors[item.Id] = text;
 
         text.TextChanged += (_, _) =>
@@ -717,6 +734,7 @@ public sealed partial class PaperWindow
             }
             text.IsDone = true;
             text.Foreground = BrightWeakTextBrush;
+            foldPreview.SetDone(true);
             _controller.MarkDirty();
 
             if (_controller.State.AutoClearCompletedTodos)
@@ -759,6 +777,7 @@ public sealed partial class PaperWindow
             }
             text.IsDone = false;
             text.Foreground = TextBrush;
+            foldPreview.SetDone(false);
             _controller.MarkDirty();
 
             if (MoveTodoItemsAfterDoneChange([item], done: false))
@@ -874,9 +893,6 @@ public sealed partial class PaperWindow
         AttachItemContextMenu(row);
         AttachItemContextMenu(check);
         AttachItemContextMenu(text);
-
-        Grid.SetColumn(text, 1);
-        grid.Children.Add(text);
 
         if (hasLinkedPath)
         {
@@ -1209,8 +1225,147 @@ public sealed partial class PaperWindow
         };
         AttachItemContextMenu(handle);
 
-        Grid.SetColumn(handle, showTodoReminderControl ? 4 : 3);
-        grid.Children.Add(handle);
+        // Reuse the trailing drag column; clipping the native editor never alters its text.
+        var foldGlyph = new System.Windows.Shapes.Path
+        {
+            Data = TodoFoldUp,
+            Stroke = WeakTextBrush,
+            StrokeThickness = AppTypography.Scale(1.15),
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Stretch = Stretch.Uniform,
+            Width = AppTypography.Scale(9),
+            Height = AppTypography.Scale(6),
+            Opacity = 0.48,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var foldButton = new Border
+        {
+            Width = Math.Max(AppTypography.Scale(18), metrics.CheckColumnWidth - AppTypography.Scale(4)),
+            Height = AppTypography.Scale(16),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = Brushes.Transparent,
+            Cursor = Cursors.Hand,
+            Visibility = Visibility.Collapsed,
+            Child = foldGlyph
+        };
+        _todoFoldFindControls[item.Id] = (foldButton, foldGlyph);
+        var trailingControls = new Grid();
+        trailingControls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        trailingControls.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(foldButton, 0);
+        trailingControls.Children.Add(foldButton);
+        Grid.SetRow(handle, 1);
+        trailingControls.Children.Add(handle);
+
+        var foldRefreshQueued = false;
+
+        bool ApplyFoldLineLimit(int maxLines)
+        {
+            if (text.MaxLines == maxLines) return false;
+
+            // WPF caches MaxLines as a cap on the inner ScrollViewer. Restoring
+            // int.MaxValue alone leaves that cap in place; an explicit unbounded
+            // MaxHeight makes WPF clear it. Remove the override before folding.
+            if (maxLines == int.MaxValue)
+                text.MaxHeight = double.PositiveInfinity;
+            else
+                text.ClearValue(FrameworkElement.MaxHeightProperty);
+
+            text.MaxLines = maxLines;
+            return true;
+        }
+
+        void RefreshFoldPresentation()
+        {
+            foldRefreshQueued = false;
+            if (!_todoEditors.TryGetValue(item.Id, out var live) || !ReferenceEquals(live, text))
+                return;
+
+            var lineCount = text.LineCount;
+            if (lineCount < 0) return; // Layout/width change will retry when lines become available.
+            var available = lineCount > TodoFoldThreshold;
+            if (!available) _foldedTodoItemIds.Remove(item.Id);
+            var folded = available && _foldedTodoItemIds.Contains(item.Id) && !text.IsKeyboardFocusWithin;
+
+            foldButton.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+            foldGlyph.Data = folded ? TodoFoldDown : TodoFoldUp;
+            foldButton.ToolTip = Strings.Get(folded ? "TodoExpandFold" : "TodoCollapseFold");
+            handle.MinHeight = available
+                ? Math.Max(AppTypography.Scale(16), metrics.RowMinHeight - AppTypography.Scale(9))
+                : metrics.RowMinHeight;
+            text.VerticalContentAlignment = folded ? VerticalAlignment.Top : VerticalAlignment.Center;
+            var maxLines = folded ? TodoFoldVisibleLines : int.MaxValue;
+            foldPreview.SetFolded(folded);
+            if (ApplyFoldLineLimit(maxLines) && folded)
+            {
+                // After editing near the end, folding should show the first two lines.
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_todoEditors.TryGetValue(item.Id, out var current) &&
+                        ReferenceEquals(current, text) &&
+                        text.MaxLines == TodoFoldVisibleLines && !text.IsKeyboardFocusWithin)
+                    {
+                        text.ScrollToLine(0);
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+            QueueTodoFindCueRefresh();
+        }
+
+        void QueueFoldRefresh()
+        {
+            if (foldRefreshQueued) return;
+            foldRefreshQueued = true;
+            Dispatcher.BeginInvoke(new Action(RefreshFoldPresentation),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        foldButton.MouseEnter += (_, _) => foldGlyph.Opacity = 0.78;
+        foldButton.MouseLeave += (_, _) =>
+            foldGlyph.Opacity = _findHiddenTodoItemIds.Contains(item.Id) ? 1.0 : 0.48;
+        foldButton.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        foldButton.MouseLeftButtonUp += (_, e) =>
+        {
+            var alreadyFolded = _foldedTodoItemIds.Contains(item.Id) && !text.IsKeyboardFocusWithin;
+            if (alreadyFolded)
+            {
+                _foldedTodoItemIds.Remove(item.Id);
+            }
+            else
+            {
+                _foldedTodoItemIds.Add(item.Id);
+                if (text.IsKeyboardFocusWithin) Keyboard.ClearFocus();
+            }
+            RefreshFoldPresentation();
+            if (IsBuiltInFindOpen)
+            {
+                // Wait for MaxLines layout before selecting a newly visible search hit.
+                _ = Dispatcher.BeginInvoke((Action)(() =>
+                {
+                    if (!IsBuiltInFindOpen) return;
+                    RefreshTodoFindCues();
+                    ApplyCurrentFindMatch();
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+            e.Handled = true;
+        };
+        text.Loaded += (_, _) => QueueFoldRefresh();
+        text.SizeChanged += (_, e) => { if (e.WidthChanged) QueueFoldRefresh(); };
+        text.TextChanged += (_, _) => QueueFoldRefresh();
+        text.GotKeyboardFocus += (_, _) =>
+        {
+            foldPreview.SetFolded(false);
+            if (_foldedTodoItemIds.Contains(item.Id)) ApplyFoldLineLimit(int.MaxValue);
+            QueueFoldRefresh();
+        };
+        text.LostKeyboardFocus += (_, _) => QueueFoldRefresh();
+
+        Grid.SetColumn(trailingControls, showTodoReminderControl ? 4 : 3);
+        grid.Children.Add(trailingControls);
 
         row.Child = grid;
         ConfigureTodoPathDrop(row, item);
@@ -1236,6 +1391,21 @@ public sealed partial class PaperWindow
     {
         if (e.Key == Key.Back && _suppressTodoBackspaceUntilKeyUp)
         {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Shift)
+        {
+            // Keep the native TextBox undo/redo path and honor the existing text limit.
+            if (box.Text.Length - box.SelectionLength + Environment.NewLine.Length <= box.MaxLength)
+            {
+                var insertionStart = box.SelectionStart;
+                box.SelectedText = Environment.NewLine;
+                // SelectedText preserves the inserted range as a selection in WPF.
+                // Collapse it so the next keystroke continues on the new line.
+                box.Select(insertionStart + Environment.NewLine.Length, 0);
+            }
             e.Handled = true;
             return;
         }
@@ -1953,6 +2123,7 @@ public sealed partial class PaperWindow
         UpdateTodoDragGhost(_todoDrag, _todoDrag.StartPoint);
 
         ShowAppendAreaAsTrashBin(active: true);
+        StartTodoDragEdgeScroll();
     }
 
     private void OnWindowPreviewMouseMove(object sender, MouseEventArgs e)
@@ -2000,8 +2171,36 @@ public sealed partial class PaperWindow
             return;
         }
 
-        EndTodoMouseDrag(commit: _todoDrag.IsDragging);
+        if (_todoDrag.IsDragging && _todoPanel != null)
+        {
+            // Flush a pending ScrollToVerticalOffset request, then commit the
+            // drop target at the pointer's actual release-time position.
+            FindVisualAncestor<ScrollViewer>(_todoPanel)?.UpdateLayout();
+            if (_todoDrag?.IsDragging == true)
+                UpdateTodoMouseDrag(e.GetPosition(_todoPanel), e.GetPosition(this));
+        }
+
+        EndTodoMouseDrag(commit: _todoDrag?.IsDragging == true);
         e.Handled = true;
+    }
+
+    // The trash and edge-scroll timer share exactly one hit-test.
+    private bool IsPointerOverTodoTrash(Point pointOnWindow)
+    {
+        if (_appendArea == null || !_appendArea.IsVisible)
+            return false;
+
+        try
+        {
+            var pos = this.TransformToVisual(_appendArea).Transform(pointOnWindow);
+            return pos.X >= 0 && pos.X <= _appendArea.ActualWidth &&
+                   pos.Y >= 0 && pos.Y <= _appendArea.ActualHeight;
+        }
+        catch
+        {
+            // Match the legacy fallback when a layout change detaches the bar.
+            return false;
+        }
     }
 
     private void UpdateTodoMouseDrag(Point pointOnPanel, Point pointOnWindow)
@@ -2012,47 +2211,35 @@ public sealed partial class PaperWindow
         }
 
         UpdateTodoDragGhost(_todoDrag, pointOnWindow);
-        ClearActiveDropIndicator();
 
-        bool overTrash = false;
-        if (_appendArea != null && _appendArea.IsVisible)
-        {
-            try
-            {
-                var transform = this.TransformToVisual(_appendArea);
-                Point posInAppend = transform.Transform(pointOnWindow);
-                if (posInAppend.X >= 0 && posInAppend.X <= _appendArea.ActualWidth &&
-                    posInAppend.Y >= 0 && posInAppend.Y <= _appendArea.ActualHeight)
-                {
-                    overTrash = true;
-                }
-            }
-            catch
-            {
-                // Fallback in case layout is not fully updated
-            }
-        }
-
+        // The current pointer/target geometry decides whether deletion is previewed,
+        // regardless of whether the pointer or the list moved.
+        var overTrash = IsPointerOverTodoTrash(pointOnWindow);
         if (overTrash)
         {
+            ClearActiveDropIndicator();
             _todoDrag.TargetId = null;
+            if (!_todoDrag.DropAtEnd)
+                ShowAppendAreaAsTrashBin(active: true, hovered: true);
             _todoDrag.DropAtEnd = true;
-            ShowAppendAreaAsTrashBin(active: true, hovered: true);
             return;
         }
 
-        ShowAppendAreaAsTrashBin(active: true, hovered: false);
+        if (_todoDrag.DropAtEnd)
+            ShowAppendAreaAsTrashBin(active: true, hovered: false);
+        _todoDrag.DropAtEnd = false;
 
         var candidates = _todoRows
             .Where(row =>
+                row.IsVisible &&
                 row.Tag is string id &&
                 !_todoGroupDragItemIds.Contains(id))
             .ToList();
 
         if (candidates.Count == 0)
         {
+            ClearActiveDropIndicator();
             _todoDrag.TargetId = null;
-            _todoDrag.DropAtEnd = false;
             return;
         }
 
@@ -2069,8 +2256,8 @@ public sealed partial class PaperWindow
 
         if (bestRow == null)
         {
+            ClearActiveDropIndicator();
             _todoDrag.TargetId = null;
-            _todoDrag.DropAtEnd = false;
             return;
         }
 
@@ -2216,6 +2403,7 @@ public sealed partial class PaperWindow
         }
 
         _todoDrag = null;
+        StopTodoDragEdgeScroll();
 
         if (IsMouseCaptured)
         {
@@ -2241,7 +2429,8 @@ public sealed partial class PaperWindow
             return;
         }
 
-        if (state.DropAtEnd && _controller.State.ShowTodoBottomBar)
+        if (state.DropAtEnd && _controller.State.ShowTodoBottomBar &&
+            IsPointerOverTodoTrash(Mouse.GetPosition(this)))
         {
             if (DeleteTodoGroupDragItems())
             {
